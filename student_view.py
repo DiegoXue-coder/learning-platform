@@ -79,13 +79,13 @@ def show_student_view(user):
                 conn.close()
 
                 if existing:
-                    st.warning(f"⚠️ 有 {len(courses_dict[None]['files'])} 个文件未能自动归类")
+                    st.warning(f"⚠️ 文件已存在，跳过")
                     os.remove(filepath)
                     continue
 
                 with st.spinner(f"AI 正在分析 {outline_file.name}..."):
                     pdf_text = read_pdf(filepath)
-                    result = parse_course_outline(pdf_text)
+                    result = parse_course_outline(pdf_text, filename=outline_file.name)
 
                 if result:
                     course_code = result.get("course_code", "未知")
@@ -299,7 +299,11 @@ def show_student_view(user):
                                     }
                                 )
                                 result = response.json()
-                                text = result["content"][0]["text"]
+                                # 修复：按 type 过滤，避免 KeyError
+                                text = next(
+                                    (block["text"] for block in result.get("content", []) if block.get("type") == "text"),
+                                    ""
+                                )
                                 try:
                                     json_match = re.search(r'\{.*\}', text, re.DOTALL)
                                     if json_match:
