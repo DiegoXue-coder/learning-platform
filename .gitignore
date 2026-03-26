@@ -1,0 +1,7 @@
+.env
+*.db
+uploads/
+outlines/
+submissions/
+__pycache__/
+*.pyc
