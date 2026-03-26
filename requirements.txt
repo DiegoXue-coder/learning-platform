@@ -1,0 +1,7 @@
+streamlit
+anthropic
+PyPDF2
+python-dotenv
+requests
+pandas
+streamlit-calendar
