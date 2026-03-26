@@ -6,9 +6,14 @@ import json
 from datetime import datetime
 
 import os
+import streamlit as st
 from dotenv import load_dotenv
 load_dotenv()
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+try:
+    API_KEY = st.secrets["ANTHROPIC_API_KEY"]
+except:
+    API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 def get_file_hash(filepath):
     md5 = hashlib.md5()

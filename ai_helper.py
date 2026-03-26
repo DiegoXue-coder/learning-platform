@@ -7,9 +7,14 @@ from datetime import datetime
 from parse_course import read_pdf
 
 import os
+import streamlit as st
 from dotenv import load_dotenv
 load_dotenv()
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+try:
+    API_KEY = st.secrets["ANTHROPIC_API_KEY"]
+except:
+    API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 def call_claude(system_prompt, messages, max_tokens=1024):
     response = requests.post(
