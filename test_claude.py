@@ -1,12 +1,15 @@
 import anthropic
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
-client = anthropic.Anthropic(api_key="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")
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 message = client.messages.create(
     model="claude-opus-4-5",
     max_tokens=1024,
     messages=[
-        {"role": "user", "content": "你好，请用中文回答：1+1等于几？"}
+        {"role": "user", "content": "你好,请用中文回答:1+1等于几?"}
     ]
 )
 

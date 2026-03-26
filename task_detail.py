@@ -280,13 +280,23 @@ def show_task_detail(task_id, user):
     # ========== 老师操作区 ==========
     if user["role"] == "teacher":
 
-        # 检查是否是任务创建者
+        # 检查编辑权限：
+        # 1. 老师自己发布的任务 → 可编辑
+        # 2. 学生发布的任务（AI解析产出）→ 所有老师可编辑
         conn = sqlite3.connect("learning_platform.db")
         c = conn.cursor()
-        c.execute("SELECT created_by FROM tasks WHERE id=?", (task_id,))
+        c.execute("""
+            SELECT t.created_by, u.role
+            FROM tasks t
+            JOIN users u ON t.created_by = u.id
+            WHERE t.id=?
+        """, (task_id,))
         task_owner = c.fetchone()
-        is_owner = task_owner and task_owner[0] == user["id"]
         conn.close()
+        # is_owner = 自己创建 OR 创建者是学生（任何老师都能编辑）
+        is_owner = task_owner and (
+            task_owner[0] == user["id"] or task_owner[1] == "student"
+        )
 
         conn = sqlite3.connect("learning_platform.db")
         c = conn.cursor()

@@ -98,36 +98,55 @@ def show_teacher_view(user):
             st.write("### 所有任务")
             conn = sqlite3.connect("learning_platform.db")
             c = conn.cursor()
-            c.execute("SELECT id, title, subject, due_date, created_at FROM tasks WHERE created_by=? ORDER BY due_date", (user["id"],))
+            c.execute("""
+                SELECT t.id, t.title, t.subject, t.due_date, t.created_by, u.username
+                FROM tasks t
+                JOIN users u ON t.created_by = u.id
+                ORDER BY t.due_date
+            """)
             tasks = c.fetchall()
             conn.close()
 
             if tasks:
                 for task in tasks:
+                    task_id, title, subject, due_date, created_by, creator_name = task
+                    # 自己发布 OR 学生发布的任务，老师都有权限
+                    conn2 = sqlite3.connect("learning_platform.db")
+                    c2 = conn2.cursor()
+                    c2.execute("SELECT role FROM users WHERE id=?", (created_by,))
+                    creator = c2.fetchone()
+                    conn2.close()
+                    is_owner = created_by == user["id"] or (creator and creator[0] == "student")
+
                     with st.container():
                         col1, col2, col3 = st.columns([3, 1, 1])
                         with col1:
-                            st.write(f"### 📋 {task[1]}")
-                            st.write(f"**学科：** {task[2]} | **截止：** {task[3]}")
+                            owner_tag = "✏️ 我发布的" if is_owner else f"👤 {creator_name} 发布"
+                            st.write(f"### 📋 {title}")
+                            st.write(f"**学科：** {subject} | **截止：** {due_date} | {owner_tag}")
                         with col2:
-                            if st.button("查看/编辑", key=f"teacher_view_{task[0]}"):
-                                st.session_state.current_task_id = task[0]
+                            btn_label = "查看/编辑" if is_owner else "查看"
+                            if st.button(btn_label, key=f"teacher_view_{task_id}"):
+                                st.session_state.current_task_id = task_id
                                 st.session_state.task_source = "teacher"
                                 st.rerun()
                         with col3:
-                            if st.button("🗑️ 删除", key=f"teacher_del_{task[0]}"):
-                                conn = sqlite3.connect("learning_platform.db")
-                                c = conn.cursor()
-                                c.execute("DELETE FROM tasks WHERE id=?", (task[0],))
-                                c.execute("DELETE FROM task_files WHERE task_id=?", (task[0],))
-                                c.execute("DELETE FROM progress WHERE task_id=?", (task[0],))
-                                conn.commit()
-                                conn.close()
-                                st.success("任务已删除")
-                                st.rerun()
+                            if is_owner:
+                                if st.button("🗑️ 删除", key=f"teacher_del_{task_id}"):
+                                    conn = sqlite3.connect("learning_platform.db")
+                                    c = conn.cursor()
+                                    c.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+                                    c.execute("DELETE FROM task_files WHERE task_id=?", (task_id,))
+                                    c.execute("DELETE FROM progress WHERE task_id=?", (task_id,))
+                                    conn.commit()
+                                    conn.close()
+                                    st.success("任务已删除")
+                                    st.rerun()
+                            else:
+                                st.write("🔒 无编辑权限")
                         st.divider()
             else:
-                st.info("还没有发布任何任务")
+                st.info("还没有任何任务")
 
     with tab4:
             st.write("### 💬 AI 助手")
