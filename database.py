@@ -20,7 +20,9 @@ def init_db():
         due_date TEXT,
         subject TEXT,
         created_by INTEGER,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        course_id INTEGER,
+        video_url TEXT
     )''')
 
     # 任务文件表
@@ -40,7 +42,7 @@ def init_db():
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )''')
 
-    # 预留资源表（以后推送文章视频用）
+    # 资源表
     c.execute('''CREATE TABLE IF NOT EXISTS resources (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         task_id INTEGER,
@@ -49,13 +51,69 @@ def init_db():
         type TEXT
     )''')
 
-    # 创建默认账号
-    c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('teacher', 'teacher123', 'teacher')")
-    c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('student', 'student123', 'student')")
+    # 课程表
+    c.execute('''CREATE TABLE IF NOT EXISTS courses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        code TEXT,
+        student_id INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # 课程资料表
+    c.execute('''CREATE TABLE IF NOT EXISTS course_materials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_code TEXT,
+        course_name TEXT,
+        week_number INTEGER,
+        title TEXT,
+        filepath TEXT,
+        student_id INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        file_hash TEXT
+    )''')
+
+    # 删除申请表
+    c.execute('''CREATE TABLE IF NOT EXISTS delete_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER,
+        student_id INTEGER,
+        reason TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # 提交表
+    c.execute('''CREATE TABLE IF NOT EXISTS submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL,
+        student_id INTEGER NOT NULL,
+        submission_type TEXT NOT NULL,
+        filename TEXT,
+        filepath TEXT,
+        comment TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # 家长学生关联表
+    c.execute('''CREATE TABLE IF NOT EXISTS parent_student (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_id INTEGER NOT NULL,
+        student_id INTEGER NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # 默认账号
+    c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('teacher', 'teacher1yunze', 'teacher')")
+    c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('teacher2', 'teacher2yunze', 'teacher')")
+    c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('student', '8888', 'student')")
+    c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('parent', 'jiazhang123', 'parent')")
+
+    # 绑定家长和学生
+    c.execute("INSERT OR IGNORE INTO parent_student (parent_id, student_id) VALUES (3, 2)")
 
     conn.commit()
     conn.close()
-    print("数据库初始化完成")
 
 if __name__ == "__main__":
     init_db()
