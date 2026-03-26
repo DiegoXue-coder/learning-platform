@@ -103,11 +103,17 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )''')
 
-    # 默认账号
+    # 创建或更新默认账号
     c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('teacher', 'teacher1yunze', 'teacher')")
     c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('teacher2', 'teacher2yunze', 'teacher')")
     c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('student', '8888', 'student')")
     c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES ('parent', 'jiazhang123', 'parent')")
+
+    # 强制更新密码（确保云端密码正确）
+    c.execute("UPDATE users SET password='teacher1yunze' WHERE username='teacher'")
+    c.execute("UPDATE users SET password='teacher2yunze' WHERE username='teacher2'")
+    c.execute("UPDATE users SET password='8888' WHERE username='student'")
+    c.execute("UPDATE users SET password='jiazhang123' WHERE username='parent'")
 
     # 绑定家长和学生
     c.execute("INSERT OR IGNORE INTO parent_student (parent_id, student_id) VALUES (3, 2)")
