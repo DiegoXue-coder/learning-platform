@@ -87,7 +87,14 @@ def parse_course_outline(pdf_text, filename=""):
     )
 
     result = response.json()
-    text = result["content"][0]["text"]
+    if "content" not in result:
+        print("API错误:", result)
+        return None
+
+    text = next(
+        (block["text"] for block in result["content"] if block.get("type") == "text"),
+        ""
+    )
 
     try:
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
