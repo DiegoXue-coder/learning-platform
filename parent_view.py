@@ -10,21 +10,15 @@ def show_parent_view(user):
 
     st.subheader("家长端")
 
-    # 获取绑定的学生
+    # 直接获取所有学生，无需绑定
     conn = sqlite3.connect("learning_platform.db")
     c = conn.cursor()
-    c.execute("""
-        SELECT u.id, u.username
-        FROM parent_student ps
-        JOIN users u ON ps.student_id = u.id
-        WHERE ps.parent_id = ?
-    """, (user["id"],))
+    c.execute("SELECT id, username FROM users WHERE role='student' ORDER BY username")
     students = c.fetchall()
     conn.close()
 
     if not students:
-        st.warning("你还没有绑定任何学生账号")
-        st.info("请联系管理员绑定你的孩子账号")
+        st.info("暂时没有学生账号")
         return
 
     tab1, tab2 = st.tabs(["📊 学习总览", "💬 AI 助手"])
