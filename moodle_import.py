@@ -119,45 +119,98 @@ def _show_auto_fetch(user):
     )
     from database import get_setting, set_setting
 
-    st.write("#### 连接 Moodle")
+    moodle_url = get_setting(f"moodle_url_{student_id}", DEFAULT_MOODLE_URL)
+    stored_cookie = get_setting(f"moodle_cookie_{student_id}", "")
 
-    with st.expander("📖 如何获取 Cookie（一次操作）", expanded=False):
+    # ── 状态检测：已存 Cookie 则自动验证 ──────────────────────────
+    if stored_cookie and "mc_verified" not in st.session_state:
+        with st.spinner("正在自动验证 Moodle 连接..."):
+            try:
+                if cookie_verify(moodle_url, stored_cookie):
+                    courses = cookie_get_courses(moodle_url, stored_cookie)
+                    st.session_state["mc_courses"] = courses
+                    st.session_state["mc_auth"] = {"mode": "cookie", "cookie": stored_cookie, "url": moodle_url}
+                    st.session_state["mc_verified"] = True
+                else:
+                    # Cookie expired
+                    set_setting(f"moodle_cookie_{student_id}", "")
+                    st.session_state["mc_need_reauth"] = True
+            except Exception:
+                st.session_state["mc_need_reauth"] = True
+
+    # ── 已连接状态 ────────────────────────────────────────────────
+    if st.session_state.get("mc_verified") and st.session_state.get("mc_courses") is not None:
+        courses = st.session_state["mc_courses"]
+        st.success(f"✅ Moodle 已连接 — 找到 **{len(courses)}** 门课程")
+        col1, col2 = st.columns([4, 1])
+        with col2:
+            if st.button("断开重连", key="mc_disconnect"):
+                set_setting(f"moodle_cookie_{student_id}", "")
+                for k in ["mc_verified", "mc_courses", "mc_auth", "mc_need_reauth", "mc_fetched"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+    # ── 未连接 / Cookie 过期 → 显示引导流程 ─────────────────────
+    elif not stored_cookie or st.session_state.get("mc_need_reauth"):
+        if st.session_state.get("mc_need_reauth"):
+            st.warning("⚠️ Moodle 登录已过期，请重新连接")
+
         st.markdown("""
-1. 浏览器打开 [moodle.telt.unsw.edu.au](https://moodle.telt.unsw.edu.au) 并登录
-2. 按 **F12** 打开开发者工具 → 点 **Application**（Chrome）或 **Storage**（Firefox）
-3. 左侧展开 **Cookies** → 点击 Moodle 网址
-4. 找到名为 **MoodleSession** 的条目，复制右侧 **Value** 列的值
-5. 粘贴到下方输入框
+<div style="background:#f0f7ff;border:1px solid #b3d4f5;border-radius:10px;padding:16px 20px;margin-bottom:12px">
+<strong>🔗 连接你的 UNSW Moodle — 只需操作一次</strong><br>
+按以下步骤获取登录凭证，之后平台会自动保持连接。
+</div>
+""", unsafe_allow_html=True)
+
+        # Step 1: open Moodle
+        st.markdown("**第 1 步：在新标签页打开 Moodle 并登录**")
+        st.markdown(
+            '<a href="https://moodle.telt.unsw.edu.au" target="_blank">'
+            '<button style="background:#1e40af;color:white;border:none;padding:8px 20px;'
+            'border-radius:6px;cursor:pointer;font-size:14px">🌐 打开 UNSW Moodle</button></a>',
+            unsafe_allow_html=True
+        )
+        st.write("")
+
+        # Step 2: instructions with visual
+        st.markdown("**第 2 步：复制 Cookie 值**")
+        st.markdown("""
+打开 Moodle 并登录后，在**同一浏览器**执行：
+
+| 浏览器 | 操作 |
+|--------|------|
+| Chrome / Edge | `F12` → **Application** → **Cookies** → `moodle.telt.unsw.edu.au` → 找 `MoodleSession` → 复制 **Value** |
+| Firefox | `F12` → **Storage** → **Cookies** → 找 `MoodleSession` → 复制 **Value** |
+| Safari | 偏好设置开启开发者菜单 → **开发** → **显示 Web 检查器** → **存储** → **Cookie** |
 """)
 
-    moodle_url = st.text_input(
-        "Moodle 地址",
-        value=get_setting(f"moodle_url_{student_id}", DEFAULT_MOODLE_URL),
-        key="mc_url",
-    )
-    cookie = st.text_input(
-        "MoodleSession Cookie 值",
-        type="password",
-        key="mc_cookie",
-        placeholder="粘贴从浏览器复制的 Cookie 值"
-    )
+        # Step 3: paste
+        st.markdown("**第 3 步：粘贴并连接**")
+        cookie_input = st.text_input(
+            "粘贴 MoodleSession 值",
+            type="password",
+            key="mc_cookie_input",
+            placeholder="eyJ... 或 一串随机字符"
+        )
 
-    if st.button("🔗 连接并获取课程列表", type="primary", key="mc_connect_cookie"):
-        if not cookie:
-            st.error("请先输入 Cookie 值")
-        else:
-            with st.spinner("正在验证 Cookie..."):
+        if st.button("✅ 连接 Moodle", type="primary", key="mc_connect_btn", disabled=not cookie_input):
+            with st.spinner("正在验证并获取课程列表..."):
                 try:
-                    if not cookie_verify(moodle_url, cookie):
-                        st.error("Cookie 无效或已过期，请重新从浏览器复制")
+                    if not cookie_verify(moodle_url, cookie_input):
+                        st.error("Cookie 无效或已过期，请确认已在 Moodle 登录，并重新复制")
                     else:
-                        courses = cookie_get_courses(moodle_url, cookie)
+                        courses = cookie_get_courses(moodle_url, cookie_input)
                         set_setting(f"moodle_url_{student_id}", moodle_url)
+                        set_setting(f"moodle_cookie_{student_id}", cookie_input)
                         st.session_state["mc_courses"] = courses
-                        st.session_state["mc_auth"] = {"mode": "cookie", "cookie": cookie, "url": moodle_url}
-                        st.success(f"✅ 连接成功，找到 {len(courses)} 门课程")
+                        st.session_state["mc_auth"] = {"mode": "cookie", "cookie": cookie_input, "url": moodle_url}
+                        st.session_state["mc_verified"] = True
+                        st.session_state.pop("mc_need_reauth", None)
+                        st.success(f"✅ 连接成功！找到 {len(courses)} 门课程")
+                        st.rerun()
                 except Exception as e:
                     st.error(f"连接失败：{e}")
+        return  # Don't show course list until connected
 
     # Course selection & fetch
     if st.session_state.get("mc_courses"):
