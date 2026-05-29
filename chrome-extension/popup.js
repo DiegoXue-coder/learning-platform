@@ -1,6 +1,10 @@
 const MOODLE_URL = "https://moodle.telt.unsw.edu.au";
 const PLATFORM_URL = "https://learning-platform-diego.streamlit.app";
 
+document.addEventListener("DOMContentLoaded", function () {
+  document.getElementById("copyBtn").addEventListener("click", getCookie);
+});
+
 function copyText(text) {
   // Most reliable method for Chrome extensions
   const ta = document.createElement("textarea");
