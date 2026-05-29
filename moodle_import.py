@@ -126,13 +126,13 @@ def _show_auto_fetch(user):
     if stored_cookie and "mc_verified" not in st.session_state:
         with st.spinner("正在自动验证 Moodle 连接..."):
             try:
-                if cookie_verify(moodle_url, stored_cookie):
+                ok, _ = cookie_verify(moodle_url, stored_cookie)
+                if ok:
                     courses = cookie_get_courses(moodle_url, stored_cookie)
                     st.session_state["mc_courses"] = courses
                     st.session_state["mc_auth"] = {"mode": "cookie", "cookie": stored_cookie, "url": moodle_url}
                     st.session_state["mc_verified"] = True
                 else:
-                    # Cookie expired
                     set_setting(f"moodle_cookie_{student_id}", "")
                     st.session_state["mc_need_reauth"] = True
             except Exception:
@@ -230,20 +230,39 @@ if(c){
         if st.button("✅ 连接 Moodle", type="primary", key="mc_connect_btn", disabled=not cookie_input):
             with st.spinner("正在验证并获取课程列表..."):
                 try:
-                    if not cookie_verify(moodle_url, cookie_input):
-                        st.error("Cookie 无效或已过期，请确认已在 Moodle 登录，并重新复制")
+                    ok, reason = cookie_verify(moodle_url, cookie_input.strip())
+                    if not ok:
+                        if "IP_BOUND" in reason:
+                            st.error(
+                                "❌ **Session IP 限制**：UNSW Moodle 把你的登录状态绑定到了你的浏览器 IP，"
+                                "我们的服务器 IP 不同，无法直接使用。\n\n"
+                                "**解决方案请看下方说明。**"
+                            )
+                            st.session_state["mc_ip_bound"] = True
+                        else:
+                            st.error(f"❌ Cookie 无效：{reason}\n\n请确认已在 Moodle 登录后再复制")
                     else:
-                        courses = cookie_get_courses(moodle_url, cookie_input)
+                        courses = cookie_get_courses(moodle_url, cookie_input.strip())
                         set_setting(f"moodle_url_{student_id}", moodle_url)
-                        set_setting(f"moodle_cookie_{student_id}", cookie_input)
+                        set_setting(f"moodle_cookie_{student_id}", cookie_input.strip())
                         st.session_state["mc_courses"] = courses
-                        st.session_state["mc_auth"] = {"mode": "cookie", "cookie": cookie_input, "url": moodle_url}
+                        st.session_state["mc_auth"] = {"mode": "cookie", "cookie": cookie_input.strip(), "url": moodle_url}
                         st.session_state["mc_verified"] = True
                         st.session_state.pop("mc_need_reauth", None)
                         st.success(f"✅ 连接成功！找到 {len(courses)} 门课程")
                         st.rerun()
                 except Exception as e:
                     st.error(f"连接失败：{e}")
+
+        if st.session_state.get("mc_ip_bound"):
+            st.warning(
+                "**UNSW Moodle 开启了 IP 绑定保护**，这意味着 Session Cookie 只能从你的设备 IP 使用，"
+                "平台服务器无法代替你发起请求。\n\n"
+                "**目前可行的替代方案：**\n"
+                "- **方案 A（推荐）**：使用「📄 手动上传 HTML」— 在 Moodle 页面按 Ctrl+S 保存为 HTML，上传后 AI 自动提取作业和公告\n"
+                "- **方案 B**：等后续版本支持浏览器端直接抓取（不经过服务器）\n\n"
+                "点上方「📄 手动上传 HTML」标签页继续。"
+            )
         return  # Don't show course list until connected
 
     # Course selection & fetch

@@ -119,12 +119,24 @@ def _cookie_session(moodle_url: str, cookie: str) -> requests.Session:
     return s
 
 
-def cookie_verify(moodle_url: str, cookie: str) -> bool:
-    """Returns True if cookie is valid (redirects to dashboard, not login page)."""
-    s = _cookie_session(moodle_url, cookie)
-    r = s.get(f"{moodle_url}/my/", timeout=TIMEOUT, allow_redirects=True)
-    # If we ended up on the login page, cookie is invalid
-    return "login" not in r.url and r.status_code == 200
+def cookie_verify(moodle_url: str, cookie: str) -> tuple[bool, str]:
+    """Returns (is_valid, reason). reason is empty string if valid."""
+    cookie = cookie.strip()
+    if not cookie:
+        return False, "Cookie 为空"
+    try:
+        s = _cookie_session(moodle_url, cookie)
+        r = s.get(f"{moodle_url}/my/", timeout=TIMEOUT, allow_redirects=True)
+        final_url = r.url
+        # Ended up back on login / SSO page = session rejected
+        login_keywords = ["login", "sso", "idp", "saml", "auth", "signin", "microsoft"]
+        if any(k in final_url.lower() for k in login_keywords):
+            return False, f"IP_BOUND:{final_url}"
+        if r.status_code != 200:
+            return False, f"HTTP {r.status_code}"
+        return True, ""
+    except Exception as e:
+        return False, f"网络错误: {e}"
 
 
 def cookie_get_courses(moodle_url: str, cookie: str) -> list[dict]:
