@@ -1,12 +1,11 @@
+from database import get_conn
 import requests
-import sqlite3
 import os
 import re
 import json
 from datetime import datetime
 from parse_course import read_pdf
 
-import os
 import streamlit as st
 from dotenv import load_dotenv
 load_dotenv()
@@ -32,40 +31,77 @@ def call_claude(system_prompt, messages, max_tokens=1024):
         }
     )
     result = response.json()
-    return result["content"][0]["text"]
+    if "content" not in result:
+        print("API错误:", result)
+        return ""
+    return next(
+        (block["text"] for block in result["content"] if block.get("type") == "text"),
+        ""
+    )
 
+@st.cache_data(ttl=300)
 def get_student_task_summary(user_id):
     status_map = {"pending": "未开始", "in_progress": "进行中", "completed": "已完成"}
-    conn = sqlite3.connect("learning_platform.db")
+
+    # 任务列表
+    conn = get_conn()
     c = conn.cursor()
     c.execute("""
         SELECT t.id, t.title, t.subject, t.due_date, t.description,
                COALESCE(p.status, 'pending') as status
         FROM tasks t
-        LEFT JOIN progress p ON t.id = p.task_id AND p.student_id = ?
+        LEFT JOIN progress p ON t.id = p.task_id AND p.student_id = %s
         ORDER BY t.due_date
     """, (user_id,))
     task_data = c.fetchall()
+
+    # 课程资料库（同一个连接）
+    c.execute("""
+        SELECT course_code, course_name, week_number, title, filepath, content
+        FROM course_materials
+        WHERE student_id = %s
+        ORDER BY course_code, week_number
+    """, (user_id,))
+    materials = c.fetchall()
     conn.close()
 
     task_summary = ""
     for t in task_data:
         task_summary += f"- 任务：{t[1]}，学科：{t[2]}，截止：{t[3]}，状态：{status_map.get(t[5], t[5])}，说明：{t[4]}\n"
-        conn = sqlite3.connect("learning_platform.db")
-        c = conn.cursor()
-        c.execute("SELECT filepath FROM task_files WHERE task_id=?", (t[0],))
-        files = c.fetchall()
-        conn.close()
-        for f in files:
-            if os.path.exists(f[0]):
-                pdf_text = read_pdf(f[0])
+
+    if materials:
+        readable = []
+        unreadable = []
+        for m in materials:
+            course_code, course_name, week_number, title, filepath, db_content = m
+            week_str = f"第{week_number}周" if week_number else "未知周次"
+            label = f"【{course_name}（{course_code}）{week_str}】{title}"
+
+            # 优先从数据库 content 字段读取
+            if db_content:
+                readable.append(f"\n{label}\n内容摘要：{db_content[:2000]}\n")
+            elif filepath and os.path.exists(filepath):
+                pdf_text = read_pdf(filepath)
                 if pdf_text:
-                    task_summary += f"  附件内容：{pdf_text}\n"
+                    readable.append(f"\n{label}\n内容摘要：{pdf_text[:2000]}\n")
+                else:
+                    unreadable.append(label)
+            else:
+                unreadable.append(label)
+
+        if readable:
+            task_summary += "\n\n=== 课程资料库（以下是真实文件内容）===\n"
+            task_summary += "".join(readable)
+
+        if unreadable:
+            task_summary += "\n\n=== 课程资料库（以下文件内容暂无法读取）===\n"
+            task_summary += "\n".join(f"- {u}" for u in unreadable)
+            task_summary += "\n重要规则：以上文件内容无法读取，绝对不要编造内容，直接告诉用户文件暂时无法读取。\n"
+
     return task_summary
 
 def get_teacher_progress_summary():
-    status_map = {"pending": "未开始", "in_progress": "进行中", "completed": "已完成"}
-    conn = sqlite3.connect("learning_platform.db")
+    conn = get_conn()
     c = conn.cursor()
     c.execute("""
         SELECT t.title, t.subject, t.due_date,
@@ -79,6 +115,7 @@ def get_teacher_progress_summary():
     """)
     progress_data = c.fetchall()
     conn.close()
+    status_map = {"pending": "未开始", "in_progress": "进行中", "completed": "已完成"}
     return "\n".join([
         f"- 任务：{r[0]}，学科：{r[1]}，截止：{r[2]}，学生：{r[3]}，进度：{status_map.get(r[4], r[4])}"
         for r in progress_data
@@ -87,7 +124,13 @@ def get_teacher_progress_summary():
 def smart_classify_files(none_files, existing_courses):
     files_summary = ""
     for f in none_files:
-        pdf_text = read_pdf(f[2])
+        # 优先从数据库读content
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("SELECT content FROM course_materials WHERE id=%s", (f[0],))
+        row = c.fetchone()
+        conn.close()
+        pdf_text = row[0] if row and row[0] else read_pdf(f[2])
         files_summary += f"文件ID:{f[0]} 文件名:{f[1]}\n内容摘要:{pdf_text[:500]}\n\n"
 
     courses_summary = "\n".join([f"- {c[0]}: {c[1]}" for c in existing_courses])
@@ -132,7 +175,10 @@ def smart_classify_files(none_files, existing_courses):
     )
 
     result = response.json()
-    text = result["content"][0]["text"]
+    text = next(
+        (block["text"] for block in result.get("content", []) if block.get("type") == "text"),
+        ""
+    )
 
     try:
         json_match = re.search(r'\{.*\}', text, re.DOTALL)

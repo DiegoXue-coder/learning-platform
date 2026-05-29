@@ -5,3 +5,5 @@ python-dotenv
 requests
 pandas
 streamlit-calendar
+psycopg2-binary
+beautifulsoup4

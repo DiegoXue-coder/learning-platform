@@ -1,17 +1,15 @@
 import os
+import base64
 import streamlit as st
-import sqlite3
 from datetime import datetime
+from database import get_conn
 from dashboard import STATUS_MAP, render_progress_bar
-from chat_component import show_chat
+from chat_component import show_chat_with_files
 
 def show_parent_view(user):
-    from task_detail import show_task_detail
-
     st.subheader("家长端")
 
-    # 直接获取所有学生，无需绑定
-    conn = sqlite3.connect("learning_platform.db")
+    conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT id, username FROM users WHERE role='student' ORDER BY username")
     students = c.fetchall()
@@ -24,7 +22,6 @@ def show_parent_view(user):
     tab1, tab2 = st.tabs(["📊 学习总览", "💬 AI 助手"])
 
     with tab1:
-        # 选择查看哪个学生
         if len(students) > 1:
             student_names = [s[1] for s in students]
             selected_name = st.selectbox("选择学生", student_names)
@@ -37,14 +34,13 @@ def show_parent_view(user):
 
         st.write(f"### 👤 {student_name} 的学习情况")
 
-        # 获取学生任务进度
-        conn = sqlite3.connect("learning_platform.db")
+        conn = get_conn()
         c = conn.cursor()
         c.execute("""
             SELECT t.id, t.title, t.subject, t.due_date,
                    COALESCE(p.status, 'pending') as status
             FROM tasks t
-            LEFT JOIN progress p ON t.id = p.task_id AND p.student_id = ?
+            LEFT JOIN progress p ON t.id = p.task_id AND p.student_id = %s
             ORDER BY t.due_date
         """, (student_id,))
         tasks = c.fetchall()
@@ -53,7 +49,6 @@ def show_parent_view(user):
         if not tasks:
             st.info("暂无任务")
         else:
-            # 统计
             total = len(tasks)
             completed = sum(1 for t in tasks if t[4] == "completed")
             in_progress = sum(1 for t in tasks if t[4] not in ["pending", "completed"])
@@ -67,8 +62,6 @@ def show_parent_view(user):
                 st.metric("✅ 已完成", completed)
 
             st.divider()
-
-            # 任务进度列表
             st.write("### 📊 任务进度")
             for task in tasks:
                 task_id, title, subject, due_date, status = task
@@ -84,111 +77,61 @@ def show_parent_view(user):
                     render_progress_bar(status)
                     st.write("")
 
-            # 查看任务详情（只读模式）
-            if st.session_state.get("current_task_id") and st.session_state.get("task_source") == "parent":
-                st.divider()
-                task_id = st.session_state.current_task_id
-                st.write("### 📋 任务详情")
+    with tab2:
+        st.write("### 💬 AI 助手")
 
-                if st.button("← 返回"):
-                    st.session_state.current_task_id = None
+        with st.expander("📎 上传文件让AI分析（可选）", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                uploaded_pdf = st.file_uploader("上传 PDF", type=["pdf"], key="parent_ai_pdf")
+            with col2:
+                uploaded_img = st.file_uploader("上传图片", type=["jpg","jpeg","png","webp"], key="parent_ai_img")
+
+            if uploaded_pdf:
+                pdf_bytes = uploaded_pdf.read()
+                st.session_state["ai_file_context"] = {
+                    "type": "pdf", "name": uploaded_pdf.name,
+                    "b64": base64.standard_b64encode(pdf_bytes).decode()
+                }
+                st.success(f"✅ 已加载：{uploaded_pdf.name}")
+
+            if uploaded_img:
+                img_bytes = uploaded_img.read()
+                ext = uploaded_img.name.split(".")[-1].lower()
+                media_map = {"jpg":"image/jpeg","jpeg":"image/jpeg","png":"image/png","webp":"image/webp"}
+                st.session_state["ai_file_context"] = {
+                    "type": "image", "name": uploaded_img.name,
+                    "b64": base64.standard_b64encode(img_bytes).decode(),
+                    "media_type": media_map.get(ext, "image/jpeg")
+                }
+                st.image(uploaded_img, width=300)
+                st.success(f"✅ 已加载：{uploaded_img.name}")
+
+            if st.session_state.get("ai_file_context"):
+                st.caption(f"当前文件：{st.session_state['ai_file_context']['name']}")
+                if st.button("🗑️ 移除文件", key="remove_parent_file"):
+                    del st.session_state["ai_file_context"]
                     st.rerun()
 
-                conn = sqlite3.connect("learning_platform.db")
-                c = conn.cursor()
-                c.execute("SELECT title, description, due_date, subject FROM tasks WHERE id=?", (task_id,))
-                task = c.fetchone()
-                c.execute("SELECT status FROM progress WHERE student_id=? AND task_id=?", (student_id, task_id))
-                progress = c.fetchone()
-                c.execute("""
-                    SELECT submission_type, filename, created_at
-                    FROM submissions
-                    WHERE task_id=? AND student_id=? AND submission_type != 'teacher_feedback'
-                    ORDER BY created_at DESC
-                """, (task_id, student_id))
-                submissions = c.fetchall()
-                conn.close()
+        col1, col2, col3 = st.columns(3)
+        quick_prompt = None
+        with col1:
+            if st.button("📋 总结文件", key="pqs1"):
+                quick_prompt = "请帮我总结这份文件的主要内容。"
+        with col2:
+            if st.button("📊 孩子学习情况", key="pqs2"):
+                quick_prompt = "请帮我分析孩子目前的学习情况，有什么需要注意的？"
+        with col3:
+            if st.button("💡 学习建议", key="pqs3"):
+                quick_prompt = "请根据孩子目前的任务情况，给出一些具体的学习建议。"
 
-                if task:
-                    col1, col2 = st.columns([2, 1])
-                    with col1:
-                        st.write(f"**学科：** {task[3]}")
-                        st.write(f"**截止日期：** {task[2] or '未设定'}")
-                        if task[1]:
-                            st.write(f"**任务说明：** {task[1]}")
-                    with col2:
-                        status = progress[0] if progress else "pending"
-                        st.write(f"**当前状态：** {STATUS_MAP.get(status, status)}")
-
-                    st.divider()
-
-                    # 提交记录详情
-                    if submissions:
-                        st.write("### 📁 孩子的提交记录")
-                        type_map = {
-                            "assignment": "📄 作业文件",
-                            "screenshot": "🖼️ 提交截图",
-                            "teacher_feedback": "💬 老师评语"
-                        }
-                        
-                        # 获取老师评语
-                        conn2 = sqlite3.connect("learning_platform.db")
-                        c2 = conn2.cursor()
-                        c2.execute("""
-                            SELECT comment, created_at FROM submissions
-                            WHERE task_id=? AND student_id=? AND submission_type='teacher_feedback'
-                            ORDER BY created_at DESC
-                        """, (task_id, student_id))
-                        feedbacks = c2.fetchall()
-                        conn2.close()
-
-                        for sub in submissions:
-                            sub_type, filename, created_at = sub
-                            with st.expander(f"{type_map.get(sub_type, sub_type)} — {created_at}"):
-                                if filename:
-                                    # 检查是否是链接（备注里）
-                                    conn2 = sqlite3.connect("learning_platform.db")
-                                    c2 = conn2.cursor()
-                                    c2.execute("""
-                                        SELECT filepath, comment FROM submissions
-                                        WHERE task_id=? AND student_id=? AND submission_type=? AND created_at=?
-                                    """, (task_id, student_id, sub_type, created_at))
-                                    sub_detail = c2.fetchone()
-                                    conn2.close()
-
-                                    if sub_detail:
-                                        filepath, comment = sub_detail
-                                        if filepath and os.path.exists(filepath):
-                                            with open(filepath, "rb") as f:
-                                                st.download_button(
-                                                    label=f"下载 {filename}",
-                                                    data=f,
-                                                    file_name=filename,
-                                                    key=f"parent_dl_{task_id}_{created_at}"
-                                                )
-                                        if comment:
-                                            st.write(f"**备注/链接：**")
-                                            st.code(comment)
-
-                        if feedbacks:
-                            st.write("### 💬 老师评语记录")
-                            for fb in feedbacks:
-                                st.warning(f"**{fb[1]}** — {fb[0]}")
-                    else:
-                        st.info("孩子还没有提交任何文件")
-
-    with tab2:
-        st.write("### 💬 AI 学习助手")
-        st.write("了解孩子的学习情况")
-
-        # 获取学生任务摘要
-        conn = sqlite3.connect("learning_platform.db")
+        conn = get_conn()
         c = conn.cursor()
         c.execute("""
             SELECT t.title, t.subject, t.due_date,
                    COALESCE(p.status, 'pending') as status
             FROM tasks t
-            LEFT JOIN progress p ON t.id = p.task_id AND p.student_id = ?
+            LEFT JOIN progress p ON t.id = p.task_id AND p.student_id = %s
             ORDER BY t.due_date
         """, (students[0][0],))
         task_data = c.fetchall()
@@ -197,18 +140,12 @@ def show_parent_view(user):
         status_map_cn = {"pending": "未接收", "in_progress": "进行中", "submitted": "待审核",
                         "content_approved": "内容通过", "check_confirmed": "检测确认",
                         "submit_approved": "待提交", "completed": "已完成", "needs_revision": "需修改"}
-
         task_summary = "\n".join([
             f"- 任务：{t[0]}，学科：{t[1]}，截止：{t[2]}，状态：{status_map_cn.get(t[3], t[3])}"
             for t in task_data
         ])
-
         system_prompt = f"""你是一个学习助手，帮助家长了解孩子的学习情况。
-以下是学生 {students[0][1]} 的任务进度：
+以下是学生 {students[0][1]} 的任务进度：\n{task_summary}\n今天的日期是 {datetime.now().strftime('%Y-%m-%d')}。
+请用温和、积极的语气回答，用中文。"""
 
-{task_summary}
-
-今天的日期是 {datetime.now().strftime('%Y-%m-%d')}。
-请用温和、积极的语气向家长汇报孩子的学习情况，用中文回答。"""
-
-        show_chat("parent_ai_messages", system_prompt, "询问孩子的学习情况，比如：孩子最近学习怎么样？")
+        show_chat_with_files("parent_ai_messages", system_prompt, "询问孩子的学习情况...", user_id=user["id"], quick_prompt=quick_prompt)

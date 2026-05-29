@@ -1,5 +1,5 @@
+from database import get_conn
 import streamlit as st
-import sqlite3
 from datetime import datetime, date
 
 STATUS_MAP = {
@@ -22,107 +22,54 @@ def render_progress_bar(current_status):
     else:
         current_idx = STEPS.index(current_status) if current_status in STEPS else 0
 
-    cols = st.columns(len(STEPS))
+    # 用单个 markdown 渲染整个进度条，比多个 st.columns + st.markdown 快很多
+    parts = []
     for i, (step, label) in enumerate(zip(STEPS, STEP_LABELS)):
-        with cols[i]:
-            if i < current_idx:
-                st.markdown(f"<div style='text-align:center;color:#22c55e;font-size:20px'>✅</div><div style='text-align:center;font-size:11px;color:#22c55e'>{label}</div>", unsafe_allow_html=True)
-            elif i == current_idx:
-                if current_status == "needs_revision":
-                    st.markdown(f"<div style='text-align:center;color:#ef4444;font-size:20px'>🔴</div><div style='text-align:center;font-size:11px;color:#ef4444;font-weight:bold'>需修改</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div style='text-align:center;color:#2563eb;font-size:20px'>🔵</div><div style='text-align:center;font-size:11px;color:#2563eb;font-weight:bold'>{label}</div>", unsafe_allow_html=True)
+        if i < current_idx:
+            icon = "✅"
+            color = "#22c55e"
+            weight = "normal"
+            text = label
+        elif i == current_idx:
+            if current_status == "needs_revision":
+                icon = "🔴"
+                color = "#ef4444"
+                weight = "bold"
+                text = "需修改"
             else:
-                st.markdown(f"<div style='text-align:center;color:#d1d5db;font-size:20px'>⭕</div><div style='text-align:center;font-size:11px;color:#9ca3af'>{label}</div>", unsafe_allow_html=True)
+                icon = "🔵"
+                color = "#2563eb"
+                weight = "bold"
+                text = label
+        else:
+            icon = "⭕"
+            color = "#9ca3af"
+            weight = "normal"
+            text = label
+        parts.append(f"<td style='text-align:center;width:14%'><div style='font-size:16px'>{icon}</div><div style='font-size:10px;color:{color};font-weight:{weight}'>{text}</div></td>")
 
-def show_student_dashboard(user):
-    today = date.today()
+    html = f"<table style='width:100%;border-collapse:collapse'><tr>{''.join(parts)}</tr></table>"
+    st.markdown(html, unsafe_allow_html=True)
 
-    conn = sqlite3.connect("learning_platform.db")
+@st.cache_data(ttl=60)
+def fetch_student_tasks(user_id):
+    conn = get_conn()
     c = conn.cursor()
     c.execute("""
         SELECT t.id, t.title, t.subject, t.due_date,
                COALESCE(p.status, 'pending') as status
         FROM tasks t
-        LEFT JOIN progress p ON t.id = p.task_id AND p.student_id = ?
+        LEFT JOIN progress p ON t.id = p.task_id AND p.student_id = %s
         ORDER BY t.due_date
-    """, (user["id"],))
+    """, (user_id,))
     tasks = c.fetchall()
     conn.close()
+    return tasks
 
-    if not tasks:
-        st.info("暂时没有任务")
-        return
-
-    total = len(tasks)
-    completed = sum(1 for t in tasks if t[4] == "completed")
-    pending = sum(1 for t in tasks if t[4] == "pending")
-    needs_action = sum(1 for t in tasks if t[4] in ["in_progress", "needs_revision", "content_approved", "submit_approved"])
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("📋 总任务", total)
-    with col2:
-        st.metric("⏳ 待接收", pending)
-    with col3:
-        st.metric("🔔 需要行动", needs_action)
-    with col4:
-        st.metric("✅ 已完成", completed)
-
-    st.divider()
-
-    # 即将截止提醒
-    urgent_tasks = []
-    for t in tasks:
-        if t[3] and t[4] != "completed":
-            try:
-                due = datetime.strptime(t[3], "%Y-%m-%d").date()
-                days_left = (due - today).days
-                if days_left <= 7:
-                    urgent_tasks.append((t, days_left))
-            except:
-                pass
-
-    if urgent_tasks:
-        st.write("### 🔔 即将截止")
-        for t, days in urgent_tasks:
-            if days < 0:
-                st.error(f"**{t[1]}** — 已逾期 {abs(days)} 天")
-            elif days == 0:
-                st.error(f"**{t[1]}** — 今天截止！")
-            else:
-                st.warning(f"**{t[1]}** — 还有 {days} 天截止")
-        st.divider()
-
-    # 任务进度（只显示未完成）
-    st.write("### 📊 任务进度")
-    active_tasks = [t for t in tasks if t[4] != "completed"]
-    if active_tasks:
-        for task in active_tasks:
-            task_id, title, subject, due_date, status = task
-            with st.container():
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.write(f"**{title}** | {subject} | 截止：{due_date or '未设定'}")
-                with col2:
-                    if st.button("查看详情", key=f"dash_view_{task_id}"):
-                        st.session_state.current_task_id = task_id
-                        st.session_state.task_source = "student"
-                        st.rerun()
-                render_progress_bar(status)
-                st.write("")
-    else:
-        st.success("🎉 所有任务已完成！")
-
-    # 已完成任务折叠显示
-    completed_tasks = [t for t in tasks if t[4] == "completed"]
-    if completed_tasks:
-        with st.expander(f"查看已完成任务（{len(completed_tasks)}）"):
-            for task in completed_tasks:
-                st.write(f"✅ **{task[1]}** | {task[2]} | 截止：{task[3] or '未设定'}")
-
-def show_teacher_dashboard(user):
-    conn = sqlite3.connect("learning_platform.db")
+@st.cache_data(ttl=60)
+def fetch_teacher_dashboard_data():
+    """一次连接取所有老师dashboard需要的数据"""
+    conn = get_conn()
     c = conn.cursor()
 
     c.execute("""
@@ -162,14 +109,88 @@ def show_teacher_dashboard(user):
         WHERE u.role = 'student'
         ORDER BY t.due_date
     """)
-    
     all_progress = c.fetchall()
     conn.close()
+    return content_reviews, submit_reviews, delete_reviews, all_progress
+
+def show_student_dashboard(user):
+    today = date.today()
+    tasks = fetch_student_tasks(user["id"])
+
+    if not tasks:
+        st.info("暂时没有任务")
+        return
+
+    total = len(tasks)
+    completed = sum(1 for t in tasks if t[4] == "completed")
+    pending = sum(1 for t in tasks if t[4] == "pending")
+    needs_action = sum(1 for t in tasks if t[4] in ["in_progress", "needs_revision", "content_approved", "submit_approved"])
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📋 总任务", total)
+    with col2:
+        st.metric("⏳ 待接收", pending)
+    with col3:
+        st.metric("🔔 需要行动", needs_action)
+    with col4:
+        st.metric("✅ 已完成", completed)
+
+    st.divider()
+
+    urgent_tasks = []
+    for t in tasks:
+        if t[3] and t[4] != "completed":
+            try:
+                due = datetime.strptime(t[3], "%Y-%m-%d").date()
+                days_left = (due - today).days
+                if days_left <= 7:
+                    urgent_tasks.append((t, days_left))
+            except:
+                pass
+
+    if urgent_tasks:
+        st.write("### 🔔 即将截止")
+        for t, days in urgent_tasks:
+            if days < 0:
+                st.error(f"**{t[1]}** — 已逾期 {abs(days)} 天")
+            elif days == 0:
+                st.error(f"**{t[1]}** — 今天截止！")
+            else:
+                st.warning(f"**{t[1]}** — 还有 {days} 天截止")
+        st.divider()
+
+    st.write("### 📊 任务进度")
+    active_tasks = [t for t in tasks if t[4] != "completed"]
+    if active_tasks:
+        for task in active_tasks:
+            task_id, title, subject, due_date, status = task
+            with st.container():
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.write(f"**{title}** | {subject} | 截止：{due_date or '未设定'}")
+                with col2:
+                    if st.button("查看详情", key=f"dash_view_{task_id}"):
+                        st.session_state.current_task_id = task_id
+                        st.session_state.task_source = "student"
+                        st.rerun()
+                render_progress_bar(status)
+                st.write("")
+    else:
+        st.success("🎉 所有任务已完成！")
+
+    completed_tasks = [t for t in tasks if t[4] == "completed"]
+    if completed_tasks:
+        with st.expander(f"查看已完成任务（{len(completed_tasks)}）"):
+            for task in completed_tasks:
+                st.write(f"✅ **{task[1]}** | {task[2]} | 截止：{task[3] or '未设定'}")
+
+def show_teacher_dashboard(user):
+    content_reviews, submit_reviews, delete_reviews, all_progress = fetch_teacher_dashboard_data()
 
     total_pending = len(content_reviews) + len(submit_reviews) + len(delete_reviews)
     completed_count = sum(1 for p in all_progress if p[5] == "completed")
 
-    # 顶部统计
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("📝 待内容审核", len(content_reviews))
@@ -182,7 +203,6 @@ def show_teacher_dashboard(user):
 
     st.divider()
 
-    # 审批提醒
     if total_pending > 0:
         st.write(f"### 🔔 待处理审批（{total_pending}）")
 
@@ -217,7 +237,6 @@ def show_teacher_dashboard(user):
 
         st.divider()
 
-    # 学生任务进度（只显示未完成）
     st.write("### 📊 学生任务进度总览")
     active_progress = [p for p in all_progress if p[5] != "completed"]
 
@@ -241,7 +260,6 @@ def show_teacher_dashboard(user):
     else:
         st.success("🎉 所有学生任务均已完成！")
 
-    # 已完成折叠显示
     completed_progress = [p for p in all_progress if p[5] == "completed"]
     if completed_progress:
         with st.expander(f"查看已完成任务（{len(completed_progress)}）"):
