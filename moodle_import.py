@@ -115,62 +115,49 @@ def _show_auto_fetch(user):
     student_id = user['id']
     from moodle_scraper import (
         DEFAULT_MOODLE_URL,
-        api_verify_token, api_get_courses, api_fetch_course_items,
         cookie_verify, cookie_get_courses, cookie_fetch_course_items,
     )
     from database import get_setting, set_setting
 
     st.write("#### 连接 Moodle")
 
+    with st.expander("📖 如何获取 Cookie（一次操作）", expanded=False):
+        st.markdown("""
+1. 浏览器打开 [moodle.telt.unsw.edu.au](https://moodle.telt.unsw.edu.au) 并登录
+2. 按 **F12** 打开开发者工具 → 点 **Application**（Chrome）或 **Storage**（Firefox）
+3. 左侧展开 **Cookies** → 点击 Moodle 网址
+4. 找到名为 **MoodleSession** 的条目，复制右侧 **Value** 列的值
+5. 粘贴到下方输入框
+""")
+
     moodle_url = st.text_input(
         "Moodle 地址",
         value=get_setting(f"moodle_url_{student_id}", DEFAULT_MOODLE_URL),
         key="mc_url",
     )
+    cookie = st.text_input(
+        "MoodleSession Cookie 值",
+        type="password",
+        key="mc_cookie",
+        placeholder="粘贴从浏览器复制的 Cookie 值"
+    )
 
-    mode = st.radio("认证方式", ["🔑 API Token（数据更完整）", "🍪 Session Cookie（通用）"],
-                    horizontal=True, key="mc_mode")
-
-    if "API Token" in mode:
-        st.caption("获取方式：Moodle → 头像 → Profile → Security keys → Create token（服务选 Moodle mobile web service）")
-        token = st.text_input("API Token", type="password", key="mc_token",
-                              value=get_setting(f"moodle_token_{student_id}", ""))
-
-        if st.button("🔗 连接并获取课程列表", type="primary", key="mc_connect_api"):
-            if not token:
-                st.error("请先输入 API Token")
-            else:
-                with st.spinner("正在连接 Moodle..."):
-                    try:
-                        info = api_verify_token(moodle_url, token)
-                        courses = api_get_courses(moodle_url, token, info["userid"])
+    if st.button("🔗 连接并获取课程列表", type="primary", key="mc_connect_cookie"):
+        if not cookie:
+            st.error("请先输入 Cookie 值")
+        else:
+            with st.spinner("正在验证 Cookie..."):
+                try:
+                    if not cookie_verify(moodle_url, cookie):
+                        st.error("Cookie 无效或已过期，请重新从浏览器复制")
+                    else:
+                        courses = cookie_get_courses(moodle_url, cookie)
                         set_setting(f"moodle_url_{student_id}", moodle_url)
-                        set_setting(f"moodle_token_{student_id}", token)
                         st.session_state["mc_courses"] = courses
-                        st.session_state["mc_auth"] = {"mode": "api", "token": token, "url": moodle_url}
-                        st.success(f"✅ 已连接：{info['fullname']} @ {info['sitename']}，找到 {len(courses)} 门课程")
-                    except Exception as e:
-                        st.error(f"连接失败：{e}")
-    else:
-        st.caption("获取方式：浏览器登录 Moodle → F12 → Application → Cookies → 复制 MoodleSession 的值")
-        cookie = st.text_input("MoodleSession Cookie 值", type="password", key="mc_cookie")
-
-        if st.button("🔗 连接并获取课程列表", type="primary", key="mc_connect_cookie"):
-            if not cookie:
-                st.error("请先输入 Cookie 值")
-            else:
-                with st.spinner("正在验证 Cookie..."):
-                    try:
-                        if not cookie_verify(moodle_url, cookie):
-                            st.error("Cookie 无效或已过期，请重新从浏览器复制")
-                        else:
-                            courses = cookie_get_courses(moodle_url, cookie)
-                            set_setting(f"moodle_url_{student_id}", moodle_url)
-                            st.session_state["mc_courses"] = courses
-                            st.session_state["mc_auth"] = {"mode": "cookie", "cookie": cookie, "url": moodle_url}
-                            st.success(f"✅ Cookie 有效，找到 {len(courses)} 门课程")
-                    except Exception as e:
-                        st.error(f"连接失败：{e}")
+                        st.session_state["mc_auth"] = {"mode": "cookie", "cookie": cookie, "url": moodle_url}
+                        st.success(f"✅ 连接成功，找到 {len(courses)} 门课程")
+                except Exception as e:
+                    st.error(f"连接失败：{e}")
 
     # Course selection & fetch
     if st.session_state.get("mc_courses"):
@@ -189,11 +176,8 @@ def _show_auto_fetch(user):
                 course = options[label]
                 with st.spinner(f"正在抓取：{course['fullname']}..."):
                     try:
-                        if auth["mode"] == "api":
-                            items = api_fetch_course_items(auth["url"], auth["token"], course["id"])
-                        else:
-                            items = cookie_fetch_course_items(
-                                auth["url"], auth["cookie"], str(course["id"]), course["fullname"])
+                        items = cookie_fetch_course_items(
+                            auth["url"], auth["cookie"], str(course["id"]), course["fullname"])
                         all_results[label] = {"course": course, "items": items}
                     except Exception as e:
                         st.error(f"{course['fullname']} 抓取失败：{e}")
