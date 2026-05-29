@@ -102,6 +102,155 @@ def show_moodle_import(user):
 
     st.write("### 🔗 Moodle 课程内容导入")
 
+    tab_auto, tab_manual = st.tabs(["🤖 自动抓取（推荐）", "📄 手动上传 HTML"])
+
+    with tab_auto:
+        _show_auto_fetch(user)
+
+    with tab_manual:
+        _show_manual_upload(user)
+
+
+def _show_auto_fetch(user):
+    student_id = user['id']
+    from moodle_scraper import (
+        DEFAULT_MOODLE_URL,
+        api_verify_token, api_get_courses, api_fetch_course_items,
+        cookie_verify, cookie_get_courses, cookie_fetch_course_items,
+    )
+    from database import get_setting, set_setting
+
+    st.write("#### 连接 Moodle")
+
+    moodle_url = st.text_input(
+        "Moodle 地址",
+        value=get_setting(f"moodle_url_{student_id}", DEFAULT_MOODLE_URL),
+        key="mc_url",
+    )
+
+    mode = st.radio("认证方式", ["🔑 API Token（数据更完整）", "🍪 Session Cookie（通用）"],
+                    horizontal=True, key="mc_mode")
+
+    if "API Token" in mode:
+        st.caption("获取方式：Moodle → 头像 → Profile → Security keys → Create token（服务选 Moodle mobile web service）")
+        token = st.text_input("API Token", type="password", key="mc_token",
+                              value=get_setting(f"moodle_token_{student_id}", ""))
+
+        if st.button("🔗 连接并获取课程列表", type="primary", key="mc_connect_api"):
+            if not token:
+                st.error("请先输入 API Token")
+            else:
+                with st.spinner("正在连接 Moodle..."):
+                    try:
+                        info = api_verify_token(moodle_url, token)
+                        courses = api_get_courses(moodle_url, token, info["userid"])
+                        set_setting(f"moodle_url_{student_id}", moodle_url)
+                        set_setting(f"moodle_token_{student_id}", token)
+                        st.session_state["mc_courses"] = courses
+                        st.session_state["mc_auth"] = {"mode": "api", "token": token, "url": moodle_url}
+                        st.success(f"✅ 已连接：{info['fullname']} @ {info['sitename']}，找到 {len(courses)} 门课程")
+                    except Exception as e:
+                        st.error(f"连接失败：{e}")
+    else:
+        st.caption("获取方式：浏览器登录 Moodle → F12 → Application → Cookies → 复制 MoodleSession 的值")
+        cookie = st.text_input("MoodleSession Cookie 值", type="password", key="mc_cookie")
+
+        if st.button("🔗 连接并获取课程列表", type="primary", key="mc_connect_cookie"):
+            if not cookie:
+                st.error("请先输入 Cookie 值")
+            else:
+                with st.spinner("正在验证 Cookie..."):
+                    try:
+                        if not cookie_verify(moodle_url, cookie):
+                            st.error("Cookie 无效或已过期，请重新从浏览器复制")
+                        else:
+                            courses = cookie_get_courses(moodle_url, cookie)
+                            set_setting(f"moodle_url_{student_id}", moodle_url)
+                            st.session_state["mc_courses"] = courses
+                            st.session_state["mc_auth"] = {"mode": "cookie", "cookie": cookie, "url": moodle_url}
+                            st.success(f"✅ Cookie 有效，找到 {len(courses)} 门课程")
+                    except Exception as e:
+                        st.error(f"连接失败：{e}")
+
+    # Course selection & fetch
+    if st.session_state.get("mc_courses"):
+        courses = st.session_state["mc_courses"]
+        auth = st.session_state["mc_auth"]
+
+        st.divider()
+        st.write("#### 选择要导入的课程")
+
+        options = {f"{c['fullname']} ({c.get('shortname','')})": c for c in courses}
+        selected_labels = st.multiselect("选择课程（可多选）", list(options.keys()), key="mc_selected")
+
+        if selected_labels and st.button("⬇️ 开始抓取选中课程", type="primary", key="mc_fetch"):
+            all_results = {}
+            for label in selected_labels:
+                course = options[label]
+                with st.spinner(f"正在抓取：{course['fullname']}..."):
+                    try:
+                        if auth["mode"] == "api":
+                            items = api_fetch_course_items(auth["url"], auth["token"], course["id"])
+                        else:
+                            items = cookie_fetch_course_items(
+                                auth["url"], auth["cookie"], str(course["id"]), course["fullname"])
+                        all_results[label] = {"course": course, "items": items}
+                    except Exception as e:
+                        st.error(f"{course['fullname']} 抓取失败：{e}")
+
+            if all_results:
+                st.session_state["mc_fetched"] = all_results
+
+    # Preview & confirm
+    if st.session_state.get("mc_fetched"):
+        fetched = st.session_state["mc_fetched"]
+        st.divider()
+        st.write("#### 抓取结果预览")
+
+        for label, data in fetched.items():
+            course = data["course"]
+            items = data["items"]
+            assignments = [i for i in items if i.get("type") == "assignment"]
+            others = [i for i in items if i.get("type") != "assignment"]
+
+            with st.expander(f"📘 {label} — {len(items)} 条内容", expanded=True):
+                if assignments:
+                    st.write(f"**📝 作业 {len(assignments)} 项**（有截止日期的自动创建任务）")
+                    for a in assignments:
+                        due = f" ｜ ⏰ {a['due_date']}" if a.get("due_date") else ""
+                        st.write(f"- {a['title']}{due}")
+                if others:
+                    st.write(f"**📁 其他内容 {len(others)} 项**")
+                    for o in others[:5]:
+                        icon = "📢" if o.get("type") == "announcement" else "📄"
+                        st.write(f"- {icon} {o['title']}")
+                    if len(others) > 5:
+                        st.caption(f"...还有 {len(others)-5} 项")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ 全部导入", type="primary", key="mc_confirm_auto"):
+                total_saved, total_tasks = 0, 0
+                for label, data in fetched.items():
+                    course = data["course"]
+                    cname = course["fullname"]
+                    ccode = course.get("shortname", "")
+                    saved = _save_items(student_id, cname, ccode, data["items"])
+                    created = _create_tasks(student_id, cname, ccode, data["items"])
+                    total_saved += saved
+                    total_tasks += created
+                del st.session_state["mc_fetched"]
+                st.success(f"✅ 导入完成：{total_saved} 条内容，{total_tasks} 个任务已创建")
+                st.rerun()
+        with col2:
+            if st.button("取消", key="mc_cancel_auto"):
+                del st.session_state["mc_fetched"]
+                st.rerun()
+
+
+def _show_manual_upload(user):
+    student_id = user['id']
+
     with st.expander("📖 使用说明", expanded=False):
         st.markdown("""
 1. 在浏览器中打开你的 **Moodle 课程页面**
