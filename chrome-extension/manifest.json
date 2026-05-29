@@ -3,7 +3,7 @@
   "name": "Moodle 登录助手",
   "version": "2.0",
   "description": "直接在浏览器里抓取 Moodle 课程数据，同步到学习平台",
-  "permissions": ["cookies", "tabs", "scripting", "storage"],
+  "permissions": ["cookies", "tabs", "scripting", "storage", "clipboardWrite"],
   "host_permissions": ["https://moodle.telt.unsw.edu.au/*"],
   "action": {
     "default_popup": "popup.html",

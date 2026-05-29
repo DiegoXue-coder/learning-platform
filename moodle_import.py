@@ -97,51 +97,35 @@ def _create_tasks(student_id, course_name, course_code, items):
     return created
 
 
-def _handle_extension_push(user):
-    """Handle data pushed from Chrome extension via ?moodle_data= URL param."""
-    import base64
-    params = st.query_params
-    if "moodle_data" not in params:
-        return False
-
-    try:
-        raw = params["moodle_data"]
-        decoded = base64.b64decode(raw).decode("utf-8")
-        data = json.loads(decoded)
-    except Exception as e:
-        st.error(f"数据解析失败：{e}")
-        st.query_params.clear()
-        return True
-
+def _import_from_json(user, raw_json: str):
+    """Parse and import JSON data from the Chrome extension."""
     student_id = user['id']
+    try:
+        data = json.loads(raw_json.strip())
+    except Exception as e:
+        st.error(f"JSON 格式错误：{e}")
+        return
+
     courses = data.get("courses", [])
+    if not courses:
+        st.error("数据为空，请重新从扩展同步")
+        return
 
-    st.success(f"✅ 收到扩展推送的数据：{len(courses)} 门课程")
-
-    if "mc_ext_data" not in st.session_state:
-        st.session_state["mc_ext_data"] = courses
-        # Clear URL param
-        st.query_params.clear()
-
-    courses = st.session_state["mc_ext_data"]
     total_saved, total_tasks = 0, 0
-
     for course in courses:
         cname = course.get("fullname", "")
         ccode = course.get("shortname", "")
         items = course.get("items", [])
-        if not cname or not items:
+        if not cname:
             continue
         saved = _save_items(student_id, cname, ccode, items)
         created = _create_tasks(student_id, cname, ccode, items)
         total_saved += saved
         total_tasks += created
 
-    if total_saved > 0 or total_tasks > 0:
-        st.success(f"导入完成：{total_saved} 条内容，{total_tasks} 个任务已创建")
-        st.session_state.pop("mc_ext_data", None)
-
-    return True
+    st.success(f"✅ 导入完成：{len(courses)} 门课程，{total_saved} 条内容，{total_tasks} 个任务已创建")
+    st.session_state.pop("mc_paste", None)
+    st.rerun()
 
 
 def show_moodle_import(user):
@@ -149,20 +133,62 @@ def show_moodle_import(user):
 
     st.write("### 🔗 Moodle 课程内容导入")
 
-    # Handle data pushed from Chrome extension
-    if _handle_extension_push(user):
-        return
+    tab_ext, tab_manual = st.tabs(["🤖 Chrome 扩展同步（推荐）", "📄 手动上传 HTML"])
 
-    tab_auto, tab_manual = st.tabs(["🤖 自动抓取（推荐）", "📄 手动上传 HTML"])
-
-    with tab_auto:
-        _show_auto_fetch(user)
+    with tab_ext:
+        _show_extension_paste(user)
 
     with tab_manual:
         _show_manual_upload(user)
 
 
-def _show_auto_fetch(user):
+def _show_extension_paste(user):
+    st.markdown("""
+**使用方法（只需3步）：**
+1. 打开 Moodle 并登录
+2. 点浏览器右上角 🎓 扩展图标 → 点「同步 Moodle 课程到平台」
+3. 扩展自动打开此页面，在下方粘贴框按 **Ctrl+V** 粘贴，点导入
+""")
+
+    paste = st.text_area(
+        "粘贴扩展数据（Ctrl+V）",
+        height=80,
+        key="mc_paste",
+        placeholder='{"courses":[...]}  ← 扩展会自动复制到这里，直接 Ctrl+V'
+    )
+
+    if st.button("✅ 导入", type="primary", key="mc_import_paste", disabled=not paste):
+        _import_from_json(user, paste)
+
+    # History
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT course_name, course_code, content_type, title, due_date
+        FROM moodle_content WHERE student_id=%s ORDER BY created_at DESC
+    """, (user['id'],))
+    history = c.fetchall()
+    conn.close()
+
+    if history:
+        st.divider()
+        st.write("### 已导入内容")
+        by_course = {}
+        for row in history:
+            key = row[1] or row[0]
+            if key not in by_course:
+                by_course[key] = {"name": row[0], "code": row[1], "items": []}
+            by_course[key]["items"].append(row)
+        icons = {"announcement": "📢", "assignment": "📝", "resource": "📁"}
+        for key, course in by_course.items():
+            with st.expander(f"📘 {course['code'] or ''} {course['name']} — {len(course['items'])} 条"):
+                for item in course["items"]:
+                    icon = icons.get(item[2], "📌")
+                    due = f" | {item[4]}" if item[4] else ""
+                    st.write(f"{icon} {item[3]}{due}")
+
+
+def _show_auto_fetch(user):  # noqa: C901  (kept for reference, no longer used)
     student_id = user['id']
     from moodle_scraper import (
         DEFAULT_MOODLE_URL,

@@ -185,18 +185,19 @@ async function startSync() {
     const itemCount = data.courses.reduce((s, c) => s + c.items.length, 0);
     setProgress(`找到 ${courseCount} 门课程，${itemCount} 个内容项目`);
 
-    // Encode and open platform
-    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
-    const url = PLATFORM + "?moodle_data=" + encoded;
+    // Copy compact JSON to clipboard (avoids URL size limits)
+    const json = JSON.stringify(data);
+    await navigator.clipboard.writeText(json);
 
     setStatus("success",
       `✅ 已抓取 <span class="course-count">${courseCount}</span> 门课程<br>` +
-      `正在打开学习平台导入...`
+      `数据已复制到剪贴板，正在打开学习平台...<br>` +
+      `<small>在平台的 Moodle 页面粘贴即可自动导入</small>`
     );
 
     setTimeout(() => {
-      chrome.tabs.create({ url });
-    }, 800);
+      chrome.tabs.create({ url: PLATFORM });
+    }, 1200);
 
   } catch (e) {
     setStatus("error", "❌ 错误：" + e.message);
