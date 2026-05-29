@@ -173,49 +173,50 @@ def _show_auto_fetch(user):
         st.write("")
 
         # Step 2: instructions with visual
-        st.markdown("**第 2 步：获取 Cookie 值（选一种方法）**")
+        st.markdown("**第 2 步：获取登录凭证**")
 
-        # Bookmarklet approach
-        bookmarklet = (
-            "javascript:(function(){"
-            "var d=document.cookie.match(/MoodleSession=([^;]+)/);"
-            "if(d){var el=document.createElement('div');"
-            "el.style='position:fixed;top:20px;left:50%;transform:translateX(-50%);"
-            "background:white;border:2px solid #1e40af;border-radius:10px;"
-            "padding:20px;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3);min-width:400px';"
-            "el.innerHTML='<b style=color:#1e40af>MoodleSession Cookie</b><br><br>"
-            "<textarea style=\"width:100%;height:60px;font-size:11px\" onclick=this.select()>'+d[1]+'</textarea>"
-            "<br><small>点击文本框全选，然后 Ctrl+C 复制</small>"
-            "<br><br><button onclick=this.parentNode.remove() "
-            "style=\"background:#1e40af;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer\">"
-            "关闭</button>';"
-            "document.body.appendChild(el);"
-            "} else {"
-            "alert('Cookie 被浏览器保护，无法直接读取。\\n请用备用方法（见下方说明）。');"
-            "}"
-            "})();"
-        )
+        import streamlit.components.v1 as components
+        bm_js = """javascript:(function(){
+var c=document.cookie.split(';').map(function(x){return x.trim()}).find(function(x){return x.indexOf('MoodleSession=')===0});
+if(c){
+  var val=c.replace('MoodleSession=','');
+  var o=document.createElement('div');
+  o.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border:3px solid #1e40af;border-radius:12px;padding:28px 32px;z-index:2147483647;box-shadow:0 8px 40px rgba(0,0,0,0.35);min-width:500px;font-family:system-ui,sans-serif;text-align:center';
+  o.innerHTML='<div style="color:#1e40af;font-size:18px;font-weight:700;margin-bottom:12px">✅ 已获取登录凭证</div><div style="color:#555;font-size:13px;margin-bottom:10px">点击下方文本框，然后按 Ctrl+A 全选，再按 Ctrl+C 复制</div><textarea onclick="this.select()" style="width:100%;height:80px;font-size:11px;border:2px solid #1e40af;border-radius:6px;padding:8px;box-sizing:border-box;resize:none">'+val+'</textarea><br><br><button onclick="var t=document.createElement(\'textarea\');t.value=\''+val+'\';document.body.appendChild(t);t.select();document.execCommand(\'copy\');document.body.removeChild(t);this.textContent=\'✅ 已复制到剪贴板！\';this.style.background=\'#16a34a\'" style="background:#1e40af;color:#fff;border:none;padding:10px 28px;border-radius:8px;cursor:pointer;font-size:14px;margin-right:8px">一键复制</button><button onclick="this.parentNode.parentNode.remove()" style="background:#e2e8f0;color:#333;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px">关闭</button>';
+  document.body.appendChild(o);
+}else{
+  alert('自动读取失败（服务器安全限制）\\n\\n请改用以下方法：\\n\\nChrome/Edge：\\nF12 → 顶部选 Application → 左侧 Cookies → 点网址 → 找 MoodleSession → 双击复制 Value\\n\\nFirefox：\\nF12 → 顶部选 Storage → Cookies → 找 MoodleSession');
+}
+})();"""
 
-        st.markdown(f"""
-<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin:8px 0">
-<b>⭐ 方法一：书签工具（最简单）</b><br>
-<small>把下面的按钮<b>拖到浏览器书签栏</b>，然后在 Moodle 页面点击它，自动弹出 Cookie 值。</small><br><br>
-<a href="{bookmarklet}"
-   style="background:#1e40af;color:white;padding:8px 16px;border-radius:6px;
-          text-decoration:none;font-size:13px;display:inline-block">
-📌 Moodle Cookie 助手
-</a>
-&nbsp;<small style="color:#64748b">← 把这个拖到书签栏</small>
+        components.html(f"""
+<div style="font-family:system-ui,sans-serif;padding:4px 0">
+  <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px 20px;margin-bottom:12px">
+    <div style="font-weight:700;font-size:14px;margin-bottom:8px">⭐ 方法一：一键书签工具（推荐）</div>
+    <div style="color:#555;font-size:13px;margin-bottom:12px">
+      把下面的蓝色按钮 <strong>拖到浏览器顶部的书签栏</strong>，然后去 Moodle 页面点它，自动弹出凭证窗口。
+    </div>
+    <a href='{bm_js}'
+       style="background:#1e40af;color:white;padding:9px 20px;border-radius:7px;
+              text-decoration:none;font-size:13px;font-weight:600;display:inline-block;
+              border:2px solid #1e3a8a;user-select:none">
+      📌 Moodle 登录助手
+    </a>
+    <span style="color:#888;font-size:12px;margin-left:10px">← 长按或拖动这个到书签栏</span>
+  </div>
+
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px">
+    <div style="font-weight:700;font-size:14px;margin-bottom:8px">🔧 方法二：手动复制（书签不可用时）</div>
+    <div style="color:#555;font-size:13px;line-height:1.9">
+      在 Moodle 页面按 <kbd style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:1px 6px">F12</kbd>，打开开发者工具后：<br>
+      &nbsp;&nbsp;• <strong>Chrome / Edge：</strong>点顶部 <strong>Application</strong> 标签
+        <span style="color:#888">（如果看不到，点最右边的 <strong>&gt;&gt;</strong> 找到它）</span>
+        → 左侧展开 <strong>Cookies</strong> → 点击网址 → 找 <strong>MoodleSession</strong> → 双击 Value 复制<br>
+      &nbsp;&nbsp;• <strong>Firefox：</strong>点顶部 <strong>存储</strong> 标签 → Cookie → 找 <strong>MoodleSession</strong> → 复制值
+    </div>
+  </div>
 </div>
-
-<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin:8px 0">
-<b>🔧 方法二：手动（书签不能用时）</b><br>
-在 Moodle 页面按 <b>F12</b>，然后：<br>
-• <b>Chrome/Edge</b>：顶部找 <b>Application</b> 标签（可能藏在 <code>>></code> 里）→ 左侧 Cookies → 找 MoodleSession<br>
-• <b>Firefox</b>：顶部找 <b>Storage</b> 标签 → Cookies → 找 MoodleSession<br>
-• <b>Safari</b>：先去 Safari 偏好设置 → 高级 → 勾选「在菜单栏显示开发菜单」→ 开发 → 显示 Web 检查器 → 存储
-</div>
-""", unsafe_allow_html=True)
+""", height=300)
 
         # Step 3: paste
         st.markdown("**第 3 步：粘贴并连接**")
