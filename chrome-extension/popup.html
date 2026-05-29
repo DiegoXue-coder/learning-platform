@@ -4,86 +4,33 @@
   <meta charset="utf-8">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      width: 320px;
-      padding: 20px;
-      background: #f8fafc;
-    }
-    .logo {
-      color: #1e40af;
-      font-size: 16px;
-      font-weight: 700;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .btn {
-      width: 100%;
-      padding: 12px;
-      background: #1e40af;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; width: 340px; padding: 20px; background: #f8fafc; }
+    .logo { color: #1e40af; font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .sub  { color: #64748b; font-size: 12px; margin-bottom: 16px; }
+    .btn  { width: 100%; padding: 11px; background: #1e40af; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
     .btn:hover { background: #1d4ed8; }
     .btn:disabled { background: #94a3b8; cursor: default; }
-    .status {
-      margin-top: 14px;
-      padding: 12px 14px;
-      border-radius: 8px;
-      font-size: 13px;
-      display: none;
-    }
-    .status.success {
-      background: #f0fdf4;
-      border: 1px solid #86efac;
-      color: #166534;
-      display: block;
-    }
-    .status.error {
-      background: #fef2f2;
-      border: 1px solid #fca5a5;
-      color: #991b1b;
-      display: block;
-    }
-    .cookie-box {
-      margin-top: 10px;
-      width: 100%;
-      height: 56px;
-      padding: 8px;
-      background: white;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      font-size: 11px;
-      color: #475569;
-      word-break: break-all;
-      resize: none;
-      cursor: text;
-    }
-    .hint {
-      margin-top: 12px;
-      font-size: 12px;
-      color: #94a3b8;
-      text-align: center;
-    }
+    .btn-sec { background: #f1f5f9; color: #334155; margin-top: 8px; }
+    .btn-sec:hover { background: #e2e8f0; }
+    .status { margin-top: 14px; padding: 12px; border-radius: 8px; font-size: 13px; display: none; line-height: 1.6; }
+    .info    { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; display: block; }
+    .success { background: #f0fdf4; border: 1px solid #86efac; color: #166534; display: block; }
+    .error   { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; display: block; }
+    .progress { margin-top: 8px; font-size: 12px; color: #64748b; }
+    .course-count { font-size: 20px; font-weight: 700; color: #1e40af; }
   </style>
 </head>
 <body>
   <div class="logo">🎓 Moodle 登录助手</div>
+  <div class="sub">数据在你的浏览器里抓取，不经过服务器</div>
 
-  <button class="btn" id="copyBtn">
-    📋 一键复制登录凭证
-  </button>
+  <button class="btn" id="syncBtn">⬇️ 同步 Moodle 课程到平台</button>
 
-  <div class="status" id="status"></div>
-  <textarea class="cookie-box" id="cookieBox" style="display:none" readonly></textarea>
-  <div class="hint" id="hint"></div>
+  <div class="status info" id="statusInfo">
+    请先打开 <a href="https://moodle.telt.unsw.edu.au" target="_blank" style="color:#1e40af">UNSW Moodle</a> 并登录，然后再点同步按钮
+  </div>
+  <div class="status" id="statusMain"></div>
+  <div class="progress" id="progressText"></div>
 
   <script src="popup.js"></script>
 </body>

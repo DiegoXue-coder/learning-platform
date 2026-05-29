@@ -97,10 +97,61 @@ def _create_tasks(student_id, course_name, course_code, items):
     return created
 
 
+def _handle_extension_push(user):
+    """Handle data pushed from Chrome extension via ?moodle_data= URL param."""
+    import base64
+    params = st.query_params
+    if "moodle_data" not in params:
+        return False
+
+    try:
+        raw = params["moodle_data"]
+        decoded = base64.b64decode(raw).decode("utf-8")
+        data = json.loads(decoded)
+    except Exception as e:
+        st.error(f"数据解析失败：{e}")
+        st.query_params.clear()
+        return True
+
+    student_id = user['id']
+    courses = data.get("courses", [])
+
+    st.success(f"✅ 收到扩展推送的数据：{len(courses)} 门课程")
+
+    if "mc_ext_data" not in st.session_state:
+        st.session_state["mc_ext_data"] = courses
+        # Clear URL param
+        st.query_params.clear()
+
+    courses = st.session_state["mc_ext_data"]
+    total_saved, total_tasks = 0, 0
+
+    for course in courses:
+        cname = course.get("fullname", "")
+        ccode = course.get("shortname", "")
+        items = course.get("items", [])
+        if not cname or not items:
+            continue
+        saved = _save_items(student_id, cname, ccode, items)
+        created = _create_tasks(student_id, cname, ccode, items)
+        total_saved += saved
+        total_tasks += created
+
+    if total_saved > 0 or total_tasks > 0:
+        st.success(f"导入完成：{total_saved} 条内容，{total_tasks} 个任务已创建")
+        st.session_state.pop("mc_ext_data", None)
+
+    return True
+
+
 def show_moodle_import(user):
     student_id = user['id']
 
     st.write("### 🔗 Moodle 课程内容导入")
+
+    # Handle data pushed from Chrome extension
+    if _handle_extension_push(user):
+        return
 
     tab_auto, tab_manual = st.tabs(["🤖 自动抓取（推荐）", "📄 手动上传 HTML"])
 

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Moodle 登录助手",
-  "version": "1.0",
-  "description": "一键获取 UNSW Moodle 登录凭证，连接学习平台",
-  "permissions": ["cookies", "clipboardWrite"],
+  "version": "2.0",
+  "description": "直接在浏览器里抓取 Moodle 课程数据，同步到学习平台",
+  "permissions": ["cookies", "tabs", "scripting", "storage"],
   "host_permissions": ["https://moodle.telt.unsw.edu.au/*"],
   "action": {
     "default_popup": "popup.html",
