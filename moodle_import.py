@@ -173,16 +173,49 @@ def _show_auto_fetch(user):
         st.write("")
 
         # Step 2: instructions with visual
-        st.markdown("**第 2 步：复制 Cookie 值**")
-        st.markdown("""
-打开 Moodle 并登录后，在**同一浏览器**执行：
+        st.markdown("**第 2 步：获取 Cookie 值（选一种方法）**")
 
-| 浏览器 | 操作 |
-|--------|------|
-| Chrome / Edge | `F12` → **Application** → **Cookies** → `moodle.telt.unsw.edu.au` → 找 `MoodleSession` → 复制 **Value** |
-| Firefox | `F12` → **Storage** → **Cookies** → 找 `MoodleSession` → 复制 **Value** |
-| Safari | 偏好设置开启开发者菜单 → **开发** → **显示 Web 检查器** → **存储** → **Cookie** |
-""")
+        # Bookmarklet approach
+        bookmarklet = (
+            "javascript:(function(){"
+            "var d=document.cookie.match(/MoodleSession=([^;]+)/);"
+            "if(d){var el=document.createElement('div');"
+            "el.style='position:fixed;top:20px;left:50%;transform:translateX(-50%);"
+            "background:white;border:2px solid #1e40af;border-radius:10px;"
+            "padding:20px;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3);min-width:400px';"
+            "el.innerHTML='<b style=color:#1e40af>MoodleSession Cookie</b><br><br>"
+            "<textarea style=\"width:100%;height:60px;font-size:11px\" onclick=this.select()>'+d[1]+'</textarea>"
+            "<br><small>点击文本框全选，然后 Ctrl+C 复制</small>"
+            "<br><br><button onclick=this.parentNode.remove() "
+            "style=\"background:#1e40af;color:white;border:none;padding:6px 16px;border-radius:6px;cursor:pointer\">"
+            "关闭</button>';"
+            "document.body.appendChild(el);"
+            "} else {"
+            "alert('Cookie 被浏览器保护，无法直接读取。\\n请用备用方法（见下方说明）。');"
+            "}"
+            "})();"
+        )
+
+        st.markdown(f"""
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin:8px 0">
+<b>⭐ 方法一：书签工具（最简单）</b><br>
+<small>把下面的按钮<b>拖到浏览器书签栏</b>，然后在 Moodle 页面点击它，自动弹出 Cookie 值。</small><br><br>
+<a href="{bookmarklet}"
+   style="background:#1e40af;color:white;padding:8px 16px;border-radius:6px;
+          text-decoration:none;font-size:13px;display:inline-block">
+📌 Moodle Cookie 助手
+</a>
+&nbsp;<small style="color:#64748b">← 把这个拖到书签栏</small>
+</div>
+
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin:8px 0">
+<b>🔧 方法二：手动（书签不能用时）</b><br>
+在 Moodle 页面按 <b>F12</b>，然后：<br>
+• <b>Chrome/Edge</b>：顶部找 <b>Application</b> 标签（可能藏在 <code>>></code> 里）→ 左侧 Cookies → 找 MoodleSession<br>
+• <b>Firefox</b>：顶部找 <b>Storage</b> 标签 → Cookies → 找 MoodleSession<br>
+• <b>Safari</b>：先去 Safari 偏好设置 → 高级 → 勾选「在菜单栏显示开发菜单」→ 开发 → 显示 Web 检查器 → 存储
+</div>
+""", unsafe_allow_html=True)
 
         # Step 3: paste
         st.markdown("**第 3 步：粘贴并连接**")
