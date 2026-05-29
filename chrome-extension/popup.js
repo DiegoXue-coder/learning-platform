@@ -196,7 +196,7 @@ async function startSync() {
     );
 
     setTimeout(() => {
-      chrome.tabs.create({ url: PLATFORM });
+      chrome.tabs.create({ url: PLATFORM + "?paste_moodle=1" });
     }, 1200);
 
   } catch (e) {

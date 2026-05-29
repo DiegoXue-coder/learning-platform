@@ -74,6 +74,17 @@ else:
             st.session_state.user = None
             st.rerun()
 
+    # Banner when redirected from Chrome extension
+    if st.query_params.get("paste_moodle") == "1":
+        st.info(
+            "📋 **Moodle 数据已复制到剪贴板！**  \n"
+            "请点下方 **「🔗 Moodle」** 标签页，在粘贴框里按 **Ctrl+V** 导入。",
+            icon="📋"
+        )
+        if st.button("✕ 关闭提示", key="close_banner"):
+            st.query_params.clear()
+            st.rerun()
+
     if user["role"] == "teacher":
         from teacher_view import show_teacher_view
         show_teacher_view(user)
