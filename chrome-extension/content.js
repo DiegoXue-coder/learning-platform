@@ -102,22 +102,41 @@ function extractAssignment(doc, activity) {
   };
 }
 
-function extractForum(doc, activity) {
+async function extractForum(doc, activity) {
   const posts = [];
-  // Discussion list view
-  doc.querySelectorAll("tr.discussion").forEach(tr => {
-    const subj = tr.querySelector("td.topic a, .subject a");
-    if (subj) posts.push({ title: subj.textContent.trim(), content: "" });
+
+  // Collect discussion links from the forum index page
+  const discussionLinks = [];
+  doc.querySelectorAll("tr.discussion td.topic a, .discussion-list td.topic a").forEach(a => {
+    if (a.href.includes("/mod/forum/discuss.php")) {
+      discussionLinks.push({ href: a.href, title: a.textContent.trim() });
+    }
   });
-  // Single discussion view
-  doc.querySelectorAll(".forumpost, .post").forEach(post => {
-    const subj = post.querySelector(".subject, h3");
-    const body = post.querySelector(".posting, .post-content-container");
-    if (subj) posts.push({
-      title: subj.textContent.trim(),
-      content: getText(body, 500)
+
+  // Fetch up to 8 discussions in parallel
+  const toFetch = discussionLinks.slice(0, 8);
+  const results = await Promise.all(toFetch.map(async d => {
+    try {
+      const r = await safeFetch(d.href);
+      const html = await r.text();
+      const ddoc = new DOMParser().parseFromString(html, "text/html");
+      const body = ddoc.querySelector(".posting, .post-content-container, .message");
+      return { title: d.title, content: getText(body, 600) };
+    } catch(e) {
+      return { title: d.title, content: "" };
+    }
+  }));
+  posts.push(...results);
+
+  // Also try single-post view (if already on a discussion page)
+  if (posts.length === 0) {
+    doc.querySelectorAll(".forumpost, .post").forEach(post => {
+      const subj = post.querySelector(".subject, h3");
+      const body = post.querySelector(".posting, .post-content-container");
+      if (subj) posts.push({ title: subj.textContent.trim(), content: getText(body, 500) });
     });
-  });
+  }
+
   return { type: "forum", name: activity.name, posts: posts.slice(0, 20) };
 }
 
@@ -126,35 +145,67 @@ function extractPage(doc, activity) {
   return { type: "page", name: activity.name, content: getText(content, 2000) };
 }
 
-async function extractResource(doc, activity) {
-  // Try to find PDF link (Moodle may redirect or show inline)
-  const pdfLink = Array.from(doc.querySelectorAll("a[href]"))
-    .find(a => /\.pdf(\?|#|$)/i.test(a.href) ||
-               (a.href.includes("pluginfile.php") && /\.pdf(\?|#|$)/i.test(a.href)));
+function bufToB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  // Process in chunks to avoid call stack overflow on large files
+  for (let i = 0; i < bytes.length; i += 8192) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  }
+  return btoa(bin);
+}
 
-  if (!pdfLink) {
-    return { type: "resource", name: activity.name, content: getText(doc.querySelector(".resourcecontent, .generalbox"), 1000) };
+async function extractResource(doc, activity) {
+  // Case 1: fetch already followed a redirect to the file itself —
+  // detect by checking if the page has a direct file link or iframe
+  const directLink = Array.from(doc.querySelectorAll("a[href]")).find(a =>
+    a.href.includes("pluginfile.php") || /\.(pdf|docx?|pptx?|xlsx?)(\?|#|$)/i.test(a.href)
+  );
+
+  const targetUrl = directLink ? directLink.href : activity.href;
+  const filename = decodeURIComponent(targetUrl.split("/").pop().split("?")[0]) || activity.name;
+
+  // Only attempt download if looks like a PDF
+  if (!/\.pdf(\?|#|$)/i.test(targetUrl) && !directLink) {
+    return {
+      type: "resource",
+      name: activity.name,
+      content: getText(doc.querySelector(".resourcecontent, .generalbox, #intro"), 1000)
+    };
   }
 
-  const filename = decodeURIComponent(pdfLink.href.split("/").pop().split("?")[0]);
-
   try {
-    const resp = await safeFetch(pdfLink.href);
-    const buf = await resp.arrayBuffer();
+    const resp = await safeFetch(targetUrl);
+    const ct = resp.headers.get("content-type") || "";
 
-    if (buf.byteLength > MAX_PDF_BYTES) {
-      return { type: "pdf_large", name: activity.name, filename, size_mb: (buf.byteLength/1024/1024).toFixed(1) };
+    // If Moodle redirected to the actual PDF binary
+    if (ct.includes("pdf") || ct.includes("octet-stream") || /\.pdf(\?|#|$)/i.test(resp.url)) {
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength > MAX_PDF_BYTES) {
+        return { type: "pdf_large", name: activity.name, filename, size_mb: (buf.byteLength/1024/1024).toFixed(1) };
+      }
+      return { type: "pdf", name: activity.name, filename, pdf_b64: bufToB64(buf), size_mb: (buf.byteLength/1024/1024).toFixed(1) };
     }
 
-    // Convert to base64
-    const bytes = new Uint8Array(buf);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    const b64 = btoa(binary);
+    // Otherwise it's an HTML page — look for PDF link inside it
+    const html = await resp.text();
+    const innerDoc = new DOMParser().parseFromString(html, "text/html");
+    const pdfA = Array.from(innerDoc.querySelectorAll("a[href]")).find(a =>
+      a.href.includes("pluginfile.php") || /\.pdf(\?|#|$)/i.test(a.href)
+    );
+    if (pdfA) {
+      const pdfResp = await safeFetch(pdfA.href);
+      const buf = await pdfResp.arrayBuffer();
+      const fn = decodeURIComponent(pdfA.href.split("/").pop().split("?")[0]);
+      if (buf.byteLength > MAX_PDF_BYTES) {
+        return { type: "pdf_large", name: activity.name, filename: fn, size_mb: (buf.byteLength/1024/1024).toFixed(1) };
+      }
+      return { type: "pdf", name: activity.name, filename: fn, pdf_b64: bufToB64(buf), size_mb: (buf.byteLength/1024/1024).toFixed(1) };
+    }
 
-    return { type: "pdf", name: activity.name, filename, pdf_b64: b64, size_mb: (buf.byteLength/1024/1024).toFixed(1) };
+    return { type: "resource", name: activity.name, content: getText(innerDoc.querySelector(".generalbox, #intro"), 1000) };
   } catch(e) {
-    return { type: "pdf_error", name: activity.name, filename, error: e.message };
+    return { type: "resource", name: activity.name, content: "", error: e.message };
   }
 }
 
@@ -166,7 +217,7 @@ async function fetchActivity(activity) {
 
     switch(activity.type) {
       case "assign":   return extractAssignment(doc, activity);
-      case "forum":    return extractForum(doc, activity);
+      case "forum":    return await extractForum(doc, activity);
       case "page":     return extractPage(doc, activity);
       case "resource": return await extractResource(doc, activity);
       default:         return { type: activity.type, name: activity.name };
