@@ -26,25 +26,26 @@ async function startExtract() {
   setStatus("info", "正在读取 Moodle 课程内容...");
 
   try {
-    // Find Moodle tab
-    const tabs = await chrome.tabs.query({});
-    const moodleTab = tabs.find(t => t.url && t.url.includes("moodle.telt.unsw.edu.au"));
+    // Prefer the currently active tab if it's Moodle, otherwise find any Moodle tab
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const allTabs = await chrome.tabs.query({});
+    const moodleTab =
+      (activeTab && activeTab.url && activeTab.url.includes("moodle.telt.unsw.edu.au"))
+        ? activeTab
+        : allTabs.find(t => t.url && t.url.includes("moodle.telt.unsw.edu.au"));
 
     if (!moodleTab) {
       setStatus("error",
         "没有找到 Moodle 标签页。<br>" +
-        "请先 <a href='https://moodle.telt.unsw.edu.au' target='_blank' style='color:#1e40af'>打开 Moodle</a>，" +
-        "进入某门课的页面后再点提取。"
+        "请先 <a href='https://moodle.telt.unsw.edu.au' target='_blank' style='color:#1e40af'>打开 Moodle</a>" +
+        " 并进入某门课的主页，再点提取。"
       );
       btn.disabled = false; btn.textContent = "📥 提取当前课程内容";
       return;
     }
 
-    if (!moodleTab.url.includes("/course/view.php")) {
-      setStatus("error", "请先在 Moodle 打开某门课的主页（URL 含 course/view.php），再点提取。");
-      btn.disabled = false; btn.textContent = "📥 提取当前课程内容";
-      return;
-    }
+    // Show which tab we're using
+    setProgress(`使用标签页：${moodleTab.url.split("?")[0]}`);
 
     setProgress("注入提取脚本...");
 
