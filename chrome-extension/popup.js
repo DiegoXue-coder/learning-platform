@@ -1,220 +1,99 @@
-const MOODLE = "https://moodle.telt.unsw.edu.au";
 const PLATFORM = "https://learning-platform-diego.streamlit.app";
 
-// ── UI helpers ────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("extractBtn").addEventListener("click", startExtract);
+});
+
+// Listen for progress messages from content script
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "PROGRESS") setProgress(msg.text);
+});
+
 function setStatus(type, html) {
-  const el = document.getElementById("statusMain");
+  const el = document.getElementById("status");
   el.className = "status " + type;
   el.innerHTML = html;
 }
 function setProgress(text) {
-  document.getElementById("progressText").textContent = text;
-}
-function setInfo(show) {
-  document.getElementById("statusInfo").style.display = show ? "block" : "none";
+  document.getElementById("progress").textContent = text;
 }
 
-// ── Script injected into the Moodle tab ──────────────────────────────────────
-function moodleFetchScript() {
-  // This runs INSIDE the Moodle page — same origin, cookies included automatically
-
-  async function fetchText(url) {
-    const r = await fetch(url, { credentials: "include" });
-    if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
-    return r.text();
-  }
-
-  function parseCourses(html) {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const seen = new Set();
-    const courses = [];
-    doc.querySelectorAll("a[href]").forEach(a => {
-      const m = a.href.match(/\/course\/view\.php\?id=(\d+)/);
-      if (m && !seen.has(m[1])) {
-        const name = a.textContent.trim();
-        if (name.length > 2) {
-          seen.add(m[1]);
-          courses.push({ id: m[1], name });
-        }
-      }
-    });
-    return courses;
-  }
-
-  function parseCourseItems(html, courseName) {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const items = [];
-
-    // Assignments / activities with due dates
-    doc.querySelectorAll("[data-activityname], .activityname, .instancename").forEach(el => {
-      const title = el.textContent.trim();
-      if (title.length > 2) {
-        items.push({ type: "resource", title, body: "", due_date: "" });
-      }
-    });
-
-    // Due dates in page text
-    const text = doc.body ? doc.body.innerText : "";
-    const duePat = /(.{5,60}?)\s*[Dd]ue[:\s]+(\d{1,2}\s+\w+\s+\d{4}|\d{4}-\d{2}-\d{2})/g;
-    let m;
-    while ((m = duePat.exec(text)) !== null) {
-      items.push({
-        type: "assignment",
-        title: m[1].trim().replace(/\n/g, " ").substring(0, 80),
-        body: "",
-        due_date: m[2]
-      });
-    }
-
-    // Sections / headings as resources
-    doc.querySelectorAll("h3.sectionname, .section-title").forEach(el => {
-      const title = el.textContent.trim();
-      if (title.length > 2) {
-        items.push({ type: "resource", title, body: "[课程章节]", due_date: "" });
-      }
-    });
-
-    // Deduplicate by title
-    const seen = new Set();
-    return items.filter(i => {
-      if (seen.has(i.title)) return false;
-      seen.add(i.title);
-      return true;
-    }).slice(0, 50); // max 50 items per course
-  }
-
-  async function run() {
-    try {
-      // Check if logged in
-      const dashHtml = await fetchText(location.origin + "/my/");
-      if (dashHtml.includes("You are not logged in") || dashHtml.includes("login")) {
-        // might be redirected — check
-        if (location.href.includes("login")) {
-          return { error: "NOT_LOGGED_IN" };
-        }
-      }
-
-      const courses = parseCourses(dashHtml);
-      if (courses.length === 0) {
-        return { error: "NO_COURSES" };
-      }
-
-      const result = { courses: [] };
-      for (const course of courses.slice(0, 12)) {
-        try {
-          const html = await fetchText(location.origin + "/course/view.php?id=" + course.id);
-          const items = parseCourseItems(html, course.name);
-          result.courses.push({
-            id: course.id,
-            fullname: course.name,
-            shortname: "",
-            items
-          });
-        } catch (e) {
-          result.courses.push({ id: course.id, fullname: course.name, shortname: "", items: [] });
-        }
-      }
-      return result;
-    } catch (e) {
-      return { error: e.message };
-    }
-  }
-
-  return run(); // returns a Promise — chrome.scripting.executeScript handles this
-}
-
-// ── Main ─────────────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("syncBtn").addEventListener("click", startSync);
-
-  // Check if user is on Moodle tab
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    const url = tabs[0] ? tabs[0].url : "";
-    if (url.includes("moodle.telt.unsw.edu.au")) {
-      setInfo(false);
-    }
-  });
-});
-
-async function startSync() {
-  const btn = document.getElementById("syncBtn");
+async function startExtract() {
+  const btn = document.getElementById("extractBtn");
   btn.disabled = true;
-  btn.textContent = "⏳ 正在抓取...";
-  setInfo(false);
-  setStatus("info", "正在读取 Moodle 课程数据，请稍候...");
+  btn.textContent = "⏳ 抓取中...";
   setProgress("");
+  setStatus("info", "正在读取 Moodle 课程内容...");
 
   try {
-    // Find an open Moodle tab; if none, create one
+    // Find Moodle tab
     const tabs = await chrome.tabs.query({});
-    let moodleTab = tabs.find(t => t.url && t.url.includes("moodle.telt.unsw.edu.au"));
+    const moodleTab = tabs.find(t => t.url && t.url.includes("moodle.telt.unsw.edu.au"));
 
     if (!moodleTab) {
       setStatus("error",
-        "没有找到已打开的 Moodle 标签页。<br>" +
-        "请先 <a href='" + MOODLE + "' target='_blank' style='color:#1e40af'>打开 Moodle</a> 并登录，再点同步。"
+        "没有找到 Moodle 标签页。<br>" +
+        "请先 <a href='https://moodle.telt.unsw.edu.au' target='_blank' style='color:#1e40af'>打开 Moodle</a>，" +
+        "进入某门课的页面后再点提取。"
       );
-      btn.disabled = false;
-      btn.textContent = "⬇️ 同步 Moodle 课程到平台";
+      btn.disabled = false; btn.textContent = "📥 提取当前课程内容";
       return;
     }
 
-    setProgress("连接到 Moodle 标签页...");
+    if (!moodleTab.url.includes("/course/view.php")) {
+      setStatus("error", "请先在 Moodle 打开某门课的主页（URL 含 course/view.php），再点提取。");
+      btn.disabled = false; btn.textContent = "📥 提取当前课程内容";
+      return;
+    }
 
-    // Inject and run the fetch script inside the Moodle tab
+    setProgress("注入提取脚本...");
+
     const results = await chrome.scripting.executeScript({
       target: { tabId: moodleTab.id },
-      func: moodleFetchScript,
+      files: ["content.js"]
     });
 
     const data = results[0].result;
 
     if (!data || data.error) {
-      const msg = data && data.error === "NOT_LOGGED_IN"
-        ? "Moodle 未登录，请先登录后再同步"
-        : data && data.error === "NO_COURSES"
-        ? "未找到课程，请确认已登录并有选课"
-        : "抓取失败：" + (data ? data.error : "未知错误");
-      setStatus("error", "❌ " + msg);
-      btn.disabled = false;
-      btn.textContent = "⬇️ 同步 Moodle 课程到平台";
+      setStatus("error", "❌ 提取失败：" + (data ? data.error : "未知错误"));
+      btn.disabled = false; btn.textContent = "📥 提取当前课程内容";
       return;
     }
 
-    const courseCount = data.courses.length;
-    const itemCount = data.courses.reduce((s, c) => s + c.items.length, 0);
-    setProgress(`找到 ${courseCount} 门课程，${itemCount} 个内容项目`);
+    // Build summary
+    const course = data.course;
+    const acts = data.activities || [];
+    const pdfs = data.pdfs || [];
+    const skipped = data.pdf_skipped || [];
+    const assignments = acts.filter(a => a.type === "assignment");
+    const forums = acts.filter(a => a.type === "forum");
 
-    // Copy compact JSON to clipboard (avoids URL size limits)
-    const json = JSON.stringify(data);
-    const byteSize = new Blob([json]).size;
+    setProgress("");
+
+    // Wrap in courses array format for platform compatibility
+    const payload = {
+      source: "extension_v2",
+      course_detail: data
+    };
+
+    const json = JSON.stringify(payload);
     await navigator.clipboard.writeText(json);
 
-    // Verify clipboard was set correctly
-    let clipboardOk = false;
-    try {
-      const check = await navigator.clipboard.readText();
-      clipboardOk = check.startsWith('{"courses"');
-    } catch(e) {}
+    let summary = `✅ <strong>${course.name}</strong><br>`;
+    summary += `📝 作业 ${assignments.length} 个 &nbsp; 📢 论坛 ${forums.length} 个<br>`;
+    if (pdfs.length > 0) summary += `📄 PDF 已导入 ${pdfs.length} 个<br>`;
+    if (skipped.length > 0) summary += `⚠️ ${skipped.length} 个 PDF 超过 3MB，跳过<br>`;
+    summary += `<br><small>数据已复制到剪贴板，正在打开平台...</small>`;
 
-    setStatus("success",
-      `✅ 已抓取 <span class="course-count">${courseCount}</span> 门课程，${itemCount} 个内容<br>` +
-      `数据大小：${(byteSize/1024).toFixed(1)} KB<br>` +
-      `剪贴板状态：${clipboardOk ? "✅ 已写入" : "⚠️ 请手动复制（见下方）"}<br><br>` +
-      `<small>打开平台 → 🔗 Moodle → 粘贴框 Ctrl+V → 导入</small>`
-    );
+    setStatus("success", summary);
 
-    // Also show first 80 chars so user can verify
-    setProgress("预览：" + json.substring(0, 80) + "...");
+    setTimeout(() => chrome.tabs.create({ url: PLATFORM + "?paste_moodle=1" }), 1200);
 
-    setTimeout(() => {
-      chrome.tabs.create({ url: PLATFORM + "?paste_moodle=1" });
-    }, 1200);
-
-  } catch (e) {
-    setStatus("error", "❌ 错误：" + e.message);
+  } catch(e) {
+    setStatus("error", "❌ " + e.message);
   }
 
   btn.disabled = false;
-  btn.textContent = "⬇️ 同步 Moodle 课程到平台";
+  btn.textContent = "📥 提取当前课程内容";
 }

@@ -98,27 +98,120 @@ def _create_tasks(student_id, course_name, course_code, items):
 
 
 def _import_from_json(user, raw_json: str):
-    """Parse and import JSON data from the Chrome extension."""
+    """Parse and import JSON data from the Chrome extension (v2 or v1 format)."""
+    import base64, os
+    from parse_course import read_pdf, parse_course_outline
     student_id = user['id']
     raw = raw_json.strip()
 
-    # Diagnostic: show what we received
-    preview = raw[:120] + ("..." if len(raw) > 120 else "")
-    st.caption(f"收到内容（前120字符）：`{preview}`")
-
     if not raw:
-        st.error("粘贴内容为空，请确认已点过扩展的「同步」按钮，剪贴板有数据后再粘贴")
+        st.error("粘贴内容为空，请先用扩展提取数据再粘贴")
         return
 
     try:
         data = json.loads(raw)
     except Exception as e:
-        st.error(f"格式错误（不是有效 JSON）：{e}\n\n收到的内容开头：{raw[:200]}")
+        st.error(f"格式错误：{e}\n\n内容开头：`{raw[:150]}`")
         return
 
+    # ── Handle v2 format (extension_v2 with course_detail) ──
+    if data.get("source") == "extension_v2":
+        detail = data.get("course_detail", {})
+        course = detail.get("course", {})
+        cname = course.get("name", "未知课程")
+        ccode = course.get("code", "")
+
+        # Convert activities to items
+        items = []
+        for act in detail.get("activities", []):
+            atype = act.get("type", "resource")
+            if atype == "assignment":
+                items.append({
+                    "type": "assignment",
+                    "title": act.get("name", ""),
+                    "body": act.get("description", ""),
+                    "due_date": act.get("due_date", "")
+                })
+            elif atype == "forum":
+                for post in act.get("posts", [])[:5]:
+                    items.append({
+                        "type": "announcement",
+                        "title": f"[{act['name']}] {post.get('title','')}",
+                        "body": post.get("content", ""),
+                        "due_date": ""
+                    })
+            else:
+                items.append({
+                    "type": "resource",
+                    "title": act.get("name", ""),
+                    "body": act.get("content", ""),
+                    "due_date": ""
+                })
+
+        saved = _save_items(student_id, cname, ccode, items)
+        created = _create_tasks(student_id, cname, ccode, items)
+
+        # Process PDFs
+        pdf_imported = 0
+        pdf_errors = []
+        os.makedirs("outlines", exist_ok=True)
+        for pdf in detail.get("pdfs", []):
+            try:
+                b64 = pdf.get("pdf_b64", "")
+                filename = pdf.get("filename", "file.pdf")
+                if not b64:
+                    continue
+                pdf_bytes = base64.b64decode(b64)
+                filepath = f"outlines/{ccode or cname}_{filename}".replace(" ", "_")[:120]
+                with open(filepath, "wb") as f:
+                    f.write(pdf_bytes)
+                # Parse with existing pipeline
+                from database import get_conn
+                import hashlib
+                file_hash = hashlib.md5(pdf_bytes).hexdigest()
+                conn = get_conn()
+                c = conn.cursor()
+                c.execute("SELECT id FROM course_materials WHERE file_hash=%s AND student_id=%s",
+                          (file_hash, student_id))
+                if not c.fetchone():
+                    pdf_text = read_pdf(filepath)
+                    result = parse_course_outline(pdf_text, filename=filename)
+                    if result:
+                        c.execute("""INSERT INTO course_materials
+                            (course_code, course_name, week_number, title, filepath, student_id, file_hash, content)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                            (result.get("course_code") or ccode,
+                             result.get("course_name") or cname,
+                             result.get("week_number"),
+                             filename, filepath, student_id, file_hash,
+                             pdf_text[:10000]))
+                    else:
+                        c.execute("""INSERT INTO course_materials
+                            (course_code, course_name, title, filepath, student_id, file_hash, content)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                            (ccode, cname, filename, filepath, student_id, file_hash, pdf_text[:10000]))
+                    conn.commit()
+                    pdf_imported += 1
+                conn.close()
+            except Exception as e:
+                pdf_errors.append(f"{pdf.get('filename','?')}: {e}")
+
+        skipped = detail.get("pdf_skipped", [])
+        msg = f"✅ **{cname}** 导入完成\n\n"
+        msg += f"- 内容条目：{saved} 条\n- 自动创建任务：{created} 个\n- PDF 导入：{pdf_imported} 个"
+        if skipped:
+            msg += f"\n- ⚠️ {len(skipped)} 个 PDF 超过 3MB 已跳过：{', '.join(p.get('filename','') for p in skipped)}"
+        if pdf_errors:
+            msg += f"\n- PDF 处理错误：{'; '.join(pdf_errors)}"
+        st.success(msg)
+        st.session_state.pop("mc_paste", None)
+        st.rerun()
+        return
+
+    # ── Handle v1 format (courses array) ──
     courses = data.get("courses", [])
     if not courses:
-        st.error(f"数据为空（courses 列表是空的）。完整内容：{raw[:300]}")
+        st.error(f"数据为空。内容：`{raw[:200]}`")
         return
 
     total_saved, total_tasks = 0, 0
