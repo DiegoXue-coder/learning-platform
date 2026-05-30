@@ -129,7 +129,8 @@ function extractPage(doc, activity) {
 async function extractResource(doc, activity) {
   // Try to find PDF link (Moodle may redirect or show inline)
   const pdfLink = Array.from(doc.querySelectorAll("a[href]"))
-    .find(a => a.href.includes("pluginfile.php") || /\.pdf(\?|$)/i.test(a.href));
+    .find(a => /\.pdf(\?|#|$)/i.test(a.href) ||
+               (a.href.includes("pluginfile.php") && /\.pdf(\?|#|$)/i.test(a.href)));
 
   if (!pdfLink) {
     return { type: "resource", name: activity.name, content: getText(doc.querySelector(".resourcecontent, .generalbox"), 1000) };

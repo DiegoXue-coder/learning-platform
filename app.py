@@ -74,16 +74,22 @@ else:
             st.session_state.user = None
             st.rerun()
 
-    # Banner when redirected from Chrome extension
-    if st.query_params.get("paste_moodle") == "1":
-        st.info(
-            "📋 **Moodle 数据已复制到剪贴板！**  \n"
-            "请点下方 **「🔗 Moodle」** 标签页，在粘贴框里按 **Ctrl+V** 导入。",
-            icon="📋"
-        )
-        if st.button("✕ 关闭提示", key="close_banner"):
+    # Auto-import when redirected from Chrome extension with URL param
+    if st.query_params.get("moodle_data"):
+        import base64 as _b64
+        try:
+            raw = _b64.b64decode(st.query_params["moodle_data"]).decode("utf-8")
+            st.session_state["mc_auto_import"] = raw
             st.query_params.clear()
             st.rerun()
+        except Exception:
+            st.query_params.clear()
+
+    if st.session_state.get("mc_auto_import"):
+        raw = st.session_state.pop("mc_auto_import")
+        st.info("📥 检测到 Moodle 课程数据，正在自动导入...")
+        from moodle_import import _import_from_json
+        _import_from_json(user, raw)
 
     if user["role"] == "teacher":
         from teacher_view import show_teacher_view

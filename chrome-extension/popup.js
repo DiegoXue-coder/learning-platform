@@ -79,17 +79,18 @@ async function startExtract() {
     };
 
     const json = JSON.stringify(payload);
-    await navigator.clipboard.writeText(json);
+    const encoded = btoa(unescape(encodeURIComponent(json)));
 
     let summary = `✅ <strong>${course.name}</strong><br>`;
     summary += `📝 作业 ${assignments.length} 个 &nbsp; 📢 论坛 ${forums.length} 个<br>`;
-    if (pdfs.length > 0) summary += `📄 PDF 已导入 ${pdfs.length} 个<br>`;
-    if (skipped.length > 0) summary += `⚠️ ${skipped.length} 个 PDF 超过 3MB，跳过<br>`;
-    summary += `<br><small>数据已复制到剪贴板，正在打开平台...</small>`;
+    if (pdfs.length > 0) summary += `📄 PDF ${pdfs.length} 个<br>`;
+    if (skipped.length > 0) summary += `⚠️ ${skipped.length} 个大文件已跳过<br>`;
+    summary += `<br><small>正在自动导入到平台，无需手动粘贴...</small>`;
 
     setStatus("success", summary);
 
-    setTimeout(() => chrome.tabs.create({ url: PLATFORM + "?paste_moodle=1" }), 1200);
+    // Use URL param for auto-import (single course data is small enough ~5KB)
+    setTimeout(() => chrome.tabs.create({ url: PLATFORM + "?moodle_data=" + encoded }), 1200);
 
   } catch(e) {
     setStatus("error", "❌ " + e.message);
