@@ -100,15 +100,25 @@ def _create_tasks(student_id, course_name, course_code, items):
 def _import_from_json(user, raw_json: str):
     """Parse and import JSON data from the Chrome extension."""
     student_id = user['id']
+    raw = raw_json.strip()
+
+    # Diagnostic: show what we received
+    preview = raw[:120] + ("..." if len(raw) > 120 else "")
+    st.caption(f"收到内容（前120字符）：`{preview}`")
+
+    if not raw:
+        st.error("粘贴内容为空，请确认已点过扩展的「同步」按钮，剪贴板有数据后再粘贴")
+        return
+
     try:
-        data = json.loads(raw_json.strip())
+        data = json.loads(raw)
     except Exception as e:
-        st.error(f"JSON 格式错误：{e}")
+        st.error(f"格式错误（不是有效 JSON）：{e}\n\n收到的内容开头：{raw[:200]}")
         return
 
     courses = data.get("courses", [])
     if not courses:
-        st.error("数据为空，请重新从扩展同步")
+        st.error(f"数据为空（courses 列表是空的）。完整内容：{raw[:300]}")
         return
 
     total_saved, total_tasks = 0, 0

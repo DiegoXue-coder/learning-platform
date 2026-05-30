@@ -187,13 +187,25 @@ async function startSync() {
 
     // Copy compact JSON to clipboard (avoids URL size limits)
     const json = JSON.stringify(data);
+    const byteSize = new Blob([json]).size;
     await navigator.clipboard.writeText(json);
 
+    // Verify clipboard was set correctly
+    let clipboardOk = false;
+    try {
+      const check = await navigator.clipboard.readText();
+      clipboardOk = check.startsWith('{"courses"');
+    } catch(e) {}
+
     setStatus("success",
-      `✅ 已抓取 <span class="course-count">${courseCount}</span> 门课程<br>` +
-      `数据已复制到剪贴板，正在打开学习平台...<br>` +
-      `<small>在平台的 Moodle 页面粘贴即可自动导入</small>`
+      `✅ 已抓取 <span class="course-count">${courseCount}</span> 门课程，${itemCount} 个内容<br>` +
+      `数据大小：${(byteSize/1024).toFixed(1)} KB<br>` +
+      `剪贴板状态：${clipboardOk ? "✅ 已写入" : "⚠️ 请手动复制（见下方）"}<br><br>` +
+      `<small>打开平台 → 🔗 Moodle → 粘贴框 Ctrl+V → 导入</small>`
     );
+
+    // Also show first 80 chars so user can verify
+    setProgress("预览：" + json.substring(0, 80) + "...");
 
     setTimeout(() => {
       chrome.tabs.create({ url: PLATFORM + "?paste_moodle=1" });
